@@ -245,41 +245,67 @@ const HeatmapRenderer = ({
            .text("No density data available for heatmap this month");
       }
 
-      // Draw stations
-      const stationGroup = svg.append("g").attr("class", "stations");
-      
-      stations.forEach(station => {
-        if (isNaN(station.longitude) || isNaN(station.latitude)) return;
-        
-        try {
-          const projected = projection([station.longitude, station.latitude]);
-          if (!projected || isNaN(projected[0]) || isNaN(projected[1])) return;
+// Draw stations
+const stationGroup = svg.append("g").attr("class", "stations");
 
-          const [x, y] = projected;
-          const density = currentDensityMap[station.id];
-          const hasData = density !== undefined && density !== null;
-          const fillColor = hasData ? colorScale(density) : "#ccc";
+stations.forEach(station => {
+  if (isNaN(station.longitude) || isNaN(station.latitude)) return;
 
-          // Create station marker
-          const g = stationGroup.append("g").attr("transform", `translate(${x}, ${y})`);
-          
-          g.append("circle")
-           .attr("r", 5)
-           .attr("fill", fillColor)
-           .attr("stroke", "#333")
-           .attr("stroke-width", 1);
+  try {
+    const projected = projection([station.longitude, station.latitude]);
+    if (!projected || isNaN(projected[0]) || isNaN(projected[1])) return;
 
-          // Add tooltip
-          const tooltipText = hasData
-            ? `${station.name}: ${density.toFixed(3)} g/cm³`
-            : `${station.name}: No data`;
-            
-          g.append("title").text(tooltipText);
-        } catch (e) { 
-          // Ignore station drawing errors
-          console.debug(`Error drawing station ${station.id}`);
-        }
-      });
+    const [x, y] = projected;
+    const density = currentDensityMap[station.id];
+    const hasData = density !== undefined && density !== null;
+    const fillColor = hasData ? colorScale(density) : "#ccc";
+
+    // Create station group
+    const g = stationGroup.append("g").attr("transform", `translate(${x}, ${y})`);
+
+    // Draw circle
+    g.append("circle")
+     .attr("r", 5)
+     .attr("fill", fillColor)
+     .attr("stroke", "#333")
+     .attr("stroke-width", 1);
+
+    // Add tooltip
+    const tooltipText = hasData
+      ? `${station.name}: ${density.toFixed(3)} g/cm³`
+      : `${station.name}: No data`;
+
+    g.append("title").text(tooltipText);
+
+    // --- Start of label adjustments ---
+    let labelX = 0;  // Default horizontal offset
+    let labelY = 15; // Default vertical offset (below circle)
+
+    // Specific adjustments for overlapping labels
+    if (station.id === 'SJ-1') {
+        labelX = -2; // Nudge SJ-1 slightly left
+        labelY = 18; // Move slightly further down
+    } else if (station.id === 'RD1') {
+        labelX = 8;  // Nudge RD1 slightly right
+        labelY = -10; // Move slightly further down
+    }
+    // Add more 'else if' conditions here for other overlaps if needed
+
+    // Add the station label with updated styles and positions
+    g.append("text")
+     .attr("x", labelX) // Use calculated horizontal offset
+     .attr("y", labelY) // Use calculated vertical offset
+     .attr("text-anchor", "middle")
+     .style("font-size", "10px")
+     .style("font-family", "sans-serif") // Set sans-serif font
+     .style("fill", "#333")
+     .text(station.name);
+     // --- End of label adjustments ---
+
+  } catch (e) {
+    console.debug(`Error drawing station ${station.id}`);
+  }
+});
 
       // Add legend (Moved to separate component)
       const legendArea = svg.append("g").attr("transform", `translate(${MAP_WIDTH - 230}, ${MAP_HEIGHT - 50})`);
