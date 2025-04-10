@@ -1,12 +1,14 @@
+// DataLoader.js
 import Papa from 'papaparse';
 import proj4 from 'proj4';
-import { createMockData } from './MockDataGenerator';
+// Removed MockDataGenerator import as we'll define generation here or assume API provides enough
+// import { createMockData } from './MockDataGenerator';
 import { getHardcodedTemperatureData } from './TemperatureData';
 
 // Constants
 const API_ENDPOINT = 'https://postgrest-seamlessgeolmap-734948684426.us-central1.run.app/gsl_brine_sites';
 const API_HEADERS = { 'Accept': 'application/json', 'Accept-Profile': 'emp' };
-const GSL_OUTLINE_ENDPOINT = 'https://ugs-geoserver-prod-flbcoqv7oa-uc.a.run.app/geoserver/gen_gis/ows?service=WFS&version=1.0.0&request=GetFeature&typeName=gen_gis%3Agsl_outline&maxFeatures=50&outputFormat=application%2Fjson';
+const GSL_OUTLINE_ENDPOINT = 'https://ugs-geoserver-prod-flbcoqv7oa-uc.a.run.app/geoserver/gen_gis/ows?service=WFS&version=1.0.0&request=GetFeature&typeName=gen_gis%3Agsl_outline_split&maxFeatures=50&outputFormat=application%2Fjson';
 
 // Define UTM Zone 12N projection string (common for GSL area)
 const utmZone12N = '+proj=utm +zone=12 +datum=WGS84 +units=m +no_defs';
@@ -19,695 +21,418 @@ const ALLOWED_SITES = ['AC3', 'AIS', 'AS2', 'FB2', 'RT4', 'RD2', 'SJ-1', 'RD1', 
 // Define the minimum date (January 1, 2000)
 const MIN_DATE = new Date(2000, 0, 1);
 
-/**
- * Load GeoJSON data for the lake outline
- * @returns {Promise<Object>} - Object with data and error properties
- */
+// Helper: Load GeoJSON
 export const loadGeoJsonData = async () => {
   console.log("Fetching GeoJSON from:", GSL_OUTLINE_ENDPOINT);
-  
   try {
-    // Try to fetch from the GeoServer WFS endpoint with timeout
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000); // 5-second timeout
-    
-    const response = await fetch(GSL_OUTLINE_ENDPOINT, {
-      signal: controller.signal
-    });
-    
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
+    const response = await fetch(GSL_OUTLINE_ENDPOINT, { signal: controller.signal });
     clearTimeout(timeoutId);
-    
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error("GeoJSON fetch failed:", response.status, response.statusText, errorText);
-      return { 
-        data: null, 
-        error: `HTTP error loading GeoJSON from URL! status: ${response.status}` 
-      };
+        const errorText = await response.text();
+        console.error("GeoJSON fetch failed:", response.status, response.statusText, errorText);
+        return { data: null, error: `HTTP error loading GeoJSON from URL! status: ${response.status}` };
     }
-    
     const gslGeoJson = await response.json();
-    console.log("GeoJSON loaded successfully:", gslGeoJson.type, 
-      `with ${gslGeoJson.features?.length || 0} features`);
-      
+    console.log("GeoJSON loaded successfully:", gslGeoJson.type, `with ${gslGeoJson.features?.length || 0} features`);
     return { data: gslGeoJson, error: null };
-    
   } catch (err) {
     console.error('Error loading GeoJSON from URL:', err);
-    return { 
-      data: null, 
-      error: `Failed to load map outline: ${err.message}` 
-    };
+    return { data: null, error: `Failed to load map outline: ${err.message}` };
   }
 };
 
-/**
- * Process temperature data from the hardcoded source
- * @param {Array} existingTimePoints - Array of existing time points
- * @param {Object} existingTempData - Object mapping time points to temperatures
- * @returns {Object} - Object with timePoints and temperatureData
- */
+
+// Helper: Process temperature data
 const processTemperatureData = (existingTimePoints, existingTempData) => {
-  try {
-    console.log("Processing hardcoded temperature data...");
-    
-    // Get data from the hardcoded source
-    const tempData = getHardcodedTemperatureData();
-    
-    // Initialize return objects (clone existing data)
-    const updatedTimePoints = [...existingTimePoints];
-    const updatedTempData = {...existingTempData};
-    
-    // Process each year-month
-    Object.entries(tempData).forEach(([yearMonth, temp]) => {
-      // Check if the time point is on or after Jan 1, 2000
-      const [year, month] = yearMonth.split('-').map(Number);
-      const date = new Date(year, month - 1, 1);
-      
-      if (date >= MIN_DATE) {
-        // Add to time points if not already present
-        if (!updatedTimePoints.includes(yearMonth)) {
-          updatedTimePoints.push(yearMonth);
-        }
-        
-        // Store temperature
-        updatedTempData[yearMonth] = temp;
-      }
-    });
-    
-    // Sort time points chronologically
-    updatedTimePoints.sort();
-    
-    console.log(`Processed temperature data with ${Object.keys(updatedTempData).length} data points`);
-    return { timePoints: updatedTimePoints, temperatureData: updatedTempData };
-  } catch (error) {
-    console.error("Error processing temperature data:", error);
-    return null; // Return null on error
-  }
+   try {
+     console.log("Processing hardcoded temperature data...");
+     const tempData = getHardcodedTemperatureData();
+     const updatedTimePoints = [...existingTimePoints];
+     const updatedTempData = {...existingTempData};
+     Object.entries(tempData).forEach(([yearMonth, temp]) => {
+       const [year, month] = yearMonth.split('-').map(Number);
+       const date = new Date(year, month - 1, 1);
+       if (date >= MIN_DATE) {
+         if (!updatedTimePoints.includes(yearMonth)) {
+           updatedTimePoints.push(yearMonth);
+         }
+         updatedTempData[yearMonth] = temp;
+       }
+     });
+     updatedTimePoints.sort();
+     console.log(`Processed temperature data with ${Object.keys(updatedTempData).length} data points`);
+     return { timePoints: updatedTimePoints, temperatureData: updatedTempData };
+   } catch (error) {
+     console.error("Error processing temperature data:", error);
+     return null;
+   }
 };
 
-/**
- * Process site data coordinates
- * @param {Object} site - Site data from API
- * @returns {Object} - Processed station with coordinates
- */
+// Helper: Process coordinates
 const processSiteCoordinates = (site) => {
   const stationId = site.site || `site-${site.id}`;
   let longitude = null, latitude = null, coordsSource = 'none';
-  
   try {
-    // Try parsing 'geom' field (GeoJSON Point)
     if (site.geom) {
-      let geomObj = site.geom; 
-      if (typeof site.geom === 'string') { 
-        try { geomObj = JSON.parse(site.geom); } catch { geomObj = null; }
-      }
-      if (geomObj && geomObj.type === 'Point' && Array.isArray(geomObj.coordinates) && geomObj.coordinates.length === 2) {
-        longitude = geomObj.coordinates[0]; 
-        latitude = geomObj.coordinates[1]; 
-        coordsSource = 'geom';
-      }
+        let geomObj = site.geom;
+        if (typeof site.geom === 'string') {
+          try { geomObj = JSON.parse(site.geom); } catch { geomObj = null; }
+        }
+        if (geomObj && geomObj.type === 'Point' && Array.isArray(geomObj.coordinates) && geomObj.coordinates.length === 2) {
+            longitude = geomObj.coordinates[0];
+            latitude = geomObj.coordinates[1];
+            coordsSource = 'geom';
+        }
     }
-    
-    // If 'geom' failed or missing, try UTM coordinates
     if (coordsSource === 'none' && site.utmeasting != null && site.utmnorthing != null) {
-      const easting = parseFloat(site.utmeasting); 
-      const northing = parseFloat(site.utmnorthing);
-      if (!isNaN(easting) && !isNaN(northing)) {
-        // Convert UTM Zone 12N to WGS84 Lon/Lat using proj4
-        const lonLat = proj4(utmZone12N, wgs84, [easting, northing]);
-        longitude = lonLat[0]; 
-        latitude = lonLat[1]; 
-        coordsSource = 'utm';
-      }
+        const easting = parseFloat(site.utmeasting);
+        const northing = parseFloat(site.utmnorthing);
+        if (!isNaN(easting) && !isNaN(northing)) {
+           const lonLat = proj4(utmZone12N, wgs84, [easting, northing]);
+           longitude = lonLat[0];
+           latitude = lonLat[1];
+           coordsSource = 'utm';
+        }
     }
-  } catch (coordError) { 
-    console.warn(`Coord error site ${stationId}:`, coordError); 
+  } catch (coordError) { console.warn(`Coord error site ${stationId}:`, coordError); }
+  if (coordsSource === 'none') {
+     console.warn(`Using default coords for site ${stationId}`);
+     longitude = -112.5;
+     latitude = 41.0;
   }
-  
-  // Use default coordinates if both methods fail
-  if (coordsSource === 'none') { 
-    console.warn(`Using default coords for site ${stationId}`); 
-    longitude = -112.5; 
-    latitude = 41.0; 
-  }
-  
-  return { 
-    id: stationId, 
-    name: site.site || `Site ${site.id}`, 
-    longitude, 
-    latitude, 
-    coordsSource 
-  };
+  return { id: stationId, name: site.site || `Site ${site.id}`, longitude, latitude, coordsSource };
 };
 
-/**
- * Generate mock density data for stations based on temperature
- * @param {Array} stations - Array of station objects
- * @param {Array} timePoints - Array of time points (YYYY-MM)
- * @param {Object} temperatureData - Object mapping time points to temperatures
- * @returns {Object} - Density data in format { 'YYYY-MM': { stationId: density } }
- */
-const generateMockDensityForStations = (stations, timePoints, temperatureData) => {
-  console.log("Generating mock density data for real stations...");
-  const densityData = {};
-  
-  // Process each time point
-  timePoints.forEach(yearMonth => {
-    densityData[yearMonth] = {};
-    const [year, month] = yearMonth.split('-').map(Number);
-    const temp = temperatureData[yearMonth];
-    
-    // Process each station
-    stations.forEach((station, index) => {
-      // Base density with factors:
-      // 1. Temperature influence (higher temp = higher density due to evaporation)
-      // 2. Year trend (slight increase over time)
-      // 3. Seasonal variation
-      // 4. Station location variation (stations have consistent relative differences)
-      // 5. Random variation
-      
-      // Temperature factor (normalized to range)
-      const tempFactor = temp ? (temp - 30) / 50 * 0.03 : 0;
-      
-      // Year factor (gradual increase)
-      const yearFactor = (year - 2000) * 0.0005;
-      
-      // Seasonal factor (higher in summer due to evaporation)
-      const seasonalFactor = Math.sin((month - 1) / 12 * 2 * Math.PI) * 0.01;
-      
-      // Station-specific factor (some stations consistently have higher density)
-      const stationFactor = (index / stations.length) * 0.05;
-      
-      // Random variation
-      const randomFactor = (Math.random() - 0.5) * 0.015;
-      
-      // Combine all factors
-      const baseDensity = 1.10 + tempFactor + yearFactor + seasonalFactor + stationFactor + randomFactor;
-      
-      // Clamp to realistic range
-      densityData[yearMonth][station.id] = Math.max(1.02, Math.min(1.28, baseDensity));
-    });
-  });
-  
-  return densityData;
-};
-
-/**
- * Extract LABminusDENg/cm3 or fallback to other density properties
- * @param {Object} reading - Reading object from API
- * @returns {number|null} - Density value or null if not available
- */
+// --- Helper function to extract density ---
 const extractDensityValue = (reading) => {
-  // Try all possible variations of the property name with newline
-  const possibleNames = [
-    'LABminusDENg/cm3',
-    'LABminusDEN\ng/cm3',
-    'LABminusDEN\\ng/cm3'
-  ];
-  
-  // Try each possible name
+  const possibleNames = ['LABminusDENg/cm3', 'LABminusDEN\ng/cm3', 'LABminusDEN\\ng/cm3'];
   for (const propName of possibleNames) {
-    // Look for exact match
     if (reading[propName] !== undefined && reading[propName] !== null) {
       const density = parseFloat(reading[propName]);
-      if (!isNaN(density)) {
-        return density;
-      }
+      if (!isNaN(density)) return density;
     }
   }
-  
-  // Try finding a key that contains "LABminusDEN"
   const densityKey = Object.keys(reading).find(key => key.includes("LABminusDEN"));
   if (densityKey && reading[densityKey] !== undefined && reading[densityKey] !== null) {
-    const density = parseFloat(reading[densityKey]);
-    if (!isNaN(density)) {
-      return density;
-    }
+     const density = parseFloat(reading[densityKey]);
+     if (!isNaN(density)) return density;
   }
-  
-  // Fallback to regular density
   if (reading.density !== undefined && reading.density !== null) {
     const density = parseFloat(reading.density);
-    if (!isNaN(density)) {
-      return density;
-    }
+    if (!isNaN(density)) return density;
   }
-  
-  // Try to calculate from salinity
   if (reading.salinity !== undefined && reading.salinity !== null) {
-    const salinity = parseFloat(reading.salinity);
-    if (!isNaN(salinity)) {
-      return 1 + (salinity * 0.0008); // Simplified approximation
-    }
+     const salinity = parseFloat(reading.salinity);
+     if (!isNaN(salinity)) return 1 + (salinity * 0.0008);
   }
-  
-  // No valid density data found
   return null;
 };
 
-/**
- * Check if a date is on or after January 1, 2000
- * @param {string} dateStr - Date string
- * @returns {boolean} - True if date is valid and on/after Jan 1, 2000
- */
-const isDateOnOrAfter2000 = (dateStr) => {
-  try {
-    const date = new Date(dateStr);
-    if (isNaN(date.getTime())) return false;
-    return date >= MIN_DATE;
-  } catch (e) {
-    return false;
+
+// --- NEW: Helper function to extract salinity ---
+const extractSalinityValue = (reading) => {
+   const salinityEOSKey = Object.keys(reading).find(key => key.toLowerCase() === 'salinity eos (g/l)');
+   if (salinityEOSKey && reading[salinityEOSKey] !== null && reading[salinityEOSKey] !== undefined) {
+      const salinity = parseFloat(reading[salinityEOSKey]);
+      if (!isNaN(salinity)) return salinity;
+   }
+  if (reading.salinity !== undefined && reading.salinity !== null) {
+    const salinity = parseFloat(reading.salinity);
+    if (!isNaN(salinity)) return salinity; // Assuming this is ppt? May need conversion to g/L
   }
+  return null;
 };
 
-/**
- * Load site and temperature data
- * @returns {Promise<Object>} - Object with stations, timePoints, densityData, temperatureData, densityRange
- */
+// Helper: Check date
+const isDateOnOrAfter2000 = (dateStr) => {
+    try {
+       const date = new Date(dateStr);
+       if (isNaN(date.getTime())) return false;
+       return date >= MIN_DATE;
+    } catch (e) { return false; }
+};
+
+// --- Helper function to generate mock density ---
+const generateMockDensityForStations = (stations, timePoints, temperatureData) => {
+   console.log("Generating mock density data...");
+   const densityData = {};
+   timePoints.forEach(yearMonth => {
+      densityData[yearMonth] = {};
+      const [year, month] = yearMonth.split('-').map(Number);
+      const temp = temperatureData[yearMonth];
+      stations.forEach((station, index) => {
+         const tempFactor = temp ? (temp - 30) / 50 * 0.03 : 0;
+         const yearFactor = (year - 2000) * 0.0005;
+         const seasonalFactor = Math.sin((month - 1) / 12 * 2 * Math.PI) * 0.01;
+         const stationFactor = (index / stations.length) * 0.05;
+         const randomFactor = (Math.random() - 0.5) * 0.015;
+         const baseDensity = 1.10 + tempFactor + yearFactor + seasonalFactor + stationFactor + randomFactor;
+         densityData[yearMonth][station.id] = Math.max(1.02, Math.min(1.28, baseDensity));
+      });
+   });
+   return densityData;
+};
+
+
+// --- NEW: Helper function to generate mock salinity ---
+const generateMockSalinityForStations = (stations, timePoints, temperatureData) => {
+  console.log("Generating mock salinity data...");
+  const salinityData = {};
+  const baseSalinity = 150; // Base g/L - adjust if needed
+
+  timePoints.forEach(yearMonth => {
+    salinityData[yearMonth] = {};
+    const [year, month] = yearMonth.split('-').map(Number);
+    const temp = temperatureData[yearMonth];
+
+    stations.forEach((station, index) => {
+      const tempFactor = temp ? (temp - 50) / 50 * -10 : 0; // Example inverse relation
+      const yearFactor = (year - 2000) * 0.1;
+      const seasonalFactor = Math.sin((month - 1) / 12 * 2 * Math.PI) * -15; // Lower in summer
+      const stationFactor = (index / stations.length) * 30;
+      const randomFactor = (Math.random() - 0.5) * 20;
+      let salinity = baseSalinity + tempFactor + yearFactor + seasonalFactor + stationFactor + randomFactor;
+      salinityData[yearMonth][station.id] = Math.max(30, Math.min(280, salinity)); // g/L range
+    });
+  });
+  return salinityData;
+};
+
+
+// --- Main data loading function ---
 export const loadSiteAndTempData = async () => {
-  console.log("Fetching data from PostgREST API and temperature file...");
-  
+  console.log("Fetching site data...");
   try {
-    // Initialize result containers
     let sitesJson = [];
     let processedStations = [];
     let tempLookup = {};
     let densityLookup = {};
+    let salinityLookup = {}; // ++ Add salinity lookup ++
     let timePointsSet = new Set();
-    let hasRealReadings = false;
+    let hasRealDensity = false;
+    let hasRealSalinity = false; // ++ Track real salinity ++
     let errorMessage = null;
     let apiSuccessful = false;
-    
-    // Try to fetch site data from the API
+
+    // Fetch API data
     try {
-      const response = await fetch(API_ENDPOINT, { 
-        method: 'GET', 
-        headers: API_HEADERS,
-        signal: AbortSignal.timeout(5000) // 5-second timeout
-      });
-      
+      const response = await fetch(API_ENDPOINT, { method: 'GET', headers: API_HEADERS, signal: AbortSignal.timeout(5000) });
       console.log("API Response Status:", response.status, response.statusText);
-      
       if (response.ok) {
-        sitesJson = await response.json();
-        console.log("Sites data received:", sitesJson.length);
-        
-        // Filter sites to only include the allowed ones
-        const filteredSites = sitesJson.filter(site => {
-          const siteId = site.site || `site-${site.id}`;
-          return ALLOWED_SITES.includes(siteId);
-        });
-        
-        console.log(`Filtered sites from ${sitesJson.length} to ${filteredSites.length} (keeping only: ${ALLOWED_SITES.join(', ')})`);
-        
-        // Replace sitesJson with the filtered sites
-        sitesJson = filteredSites;
-        
-        // Log a sample site to inspect structure
-        if (sitesJson.length > 0 && sitesJson[0].readings && sitesJson[0].readings.length > 0) {
-          console.log("Sample reading fields:", Object.keys(sitesJson[0].readings[0]));
-        }
-        
-        apiSuccessful = true;
-        
-        // Process sites' coordinates
-        processedStations = sitesJson.map(processSiteCoordinates)
-          .filter(st => st.longitude != null && st.latitude != null);
-        
-        console.log(`Processed ${processedStations.length} stations with coordinates.`);
-        
-        // Initialize density reading counters
-        let densityReadingsCount = 0;
-        let readingsWithDensity = [];
-        
-        // Process readings from sites
-        if (processedStations.length > 0) {
-          sitesJson.forEach(site => {
-            const stationId = site.site || `site-${site.id}`;
-            // Only process readings for stations with coordinates
-            const stationExists = processedStations.some(ps => ps.id === stationId);
-            if (!stationExists || !site.readings || !Array.isArray(site.readings)) return;
+         sitesJson = await response.json();
+         apiSuccessful = true;
+         const filteredSites = sitesJson.filter(site => ALLOWED_SITES.includes(site.site || `site-${site.id}`));
+         sitesJson = filteredSites; // Use filtered sites
+         processedStations = sitesJson.map(processSiteCoordinates).filter(st => st.longitude != null && st.latitude != null);
 
-            site.readings
-              // Only include readings from Jan 1, 2000 or later
-              .filter(reading => reading.date && isDateOnOrAfter2000(reading.date))
-              .forEach(reading => {
-                if (!reading.date) return;
-                
-                try {
-                  // Parse date and format as 'YYYY-MM'
-                  const dateObj = new Date(reading.date); 
-                  if (isNaN(dateObj.getTime())) return;
-                  
-                  const year = dateObj.getFullYear(); 
-                  const month = (dateObj.getMonth() + 1).toString().padStart(2, '0'); 
-                  const yearMonth = `${year}-${month}`;
-                  timePointsSet.add(yearMonth);
+         if (processedStations.length > 0) {
+            sitesJson.forEach(site => {
+              const stationId = site.site || `site-${site.id}`;
+              if (!processedStations.some(ps => ps.id === stationId) || !site.readings || !Array.isArray(site.readings)) return;
 
-                  // Process temperature
-                  if (reading.temperature != null) {
-                    if (!tempLookup[yearMonth]) tempLookup[yearMonth] = [];
-                    tempLookup[yearMonth].push(reading.temperature);
-                  }
+              site.readings
+                .filter(reading => reading.date && isDateOnOrAfter2000(reading.date))
+                .forEach(reading => {
+                  try {
+                    const dateObj = new Date(reading.date);
+                    if (isNaN(dateObj.getTime())) return;
+                    const year = dateObj.getFullYear();
+                    const month = (dateObj.getMonth() + 1).toString().padStart(2, '0');
+                    const yearMonth = `${year}-${month}`;
+                    timePointsSet.add(yearMonth);
 
-                  // Extract density from LABminusDENg/cm3 or other sources
-                  const densityValue = extractDensityValue(reading);
-                  
-                  if (densityValue !== null) {
-                    densityReadingsCount++;
-                    
-                    // Save the date and value for logging (limit to 10 samples)
-                    if (readingsWithDensity.length < 10) {
-                      readingsWithDensity.push({ 
-                        date: reading.date, 
-                        station: stationId, 
-                        density: densityValue 
-                      });
+                    // Temperature (keep as before)
+                    if (reading.temperature != null) {
+                        if (!tempLookup[yearMonth]) tempLookup[yearMonth] = [];
+                        tempLookup[yearMonth].push(reading.temperature);
                     }
-                    
-                    hasRealReadings = true; // Mark that we found real data
-                    if (!densityLookup[yearMonth]) densityLookup[yearMonth] = {};
-                    densityLookup[yearMonth][stationId] = densityValue;
-                  }
-                } catch (parseError) { 
-                  console.warn(`Error parsing reading for ${stationId}:`, parseError); 
-                }
-              });
-          });
 
-          // Log density reading results
-          console.log(`Found ${densityReadingsCount} readings with density values`);
-          if (readingsWithDensity.length > 0) {
-            console.log("Sample density readings:", readingsWithDensity);
-          }
+                    // Density
+                    const densityValue = extractDensityValue(reading);
+                    if (densityValue !== null) {
+                        hasRealDensity = true;
+                        if (!densityLookup[yearMonth]) densityLookup[yearMonth] = {};
+                        densityLookup[yearMonth][stationId] = densityValue;
+                    }
 
-          // Average monthly temperatures
-          const averagedTempData = {};
-          for (const yearMonth in tempLookup) {
-            const temps = tempLookup[yearMonth];
-            if (temps.length > 0) { 
-              averagedTempData[yearMonth] = temps.reduce((a, b) => a + b, 0) / temps.length; 
-            }
-          }
-          tempLookup = averagedTempData;
-          
-          console.log("Has real density readings:", hasRealReadings);
-        }
-      } else {
-        errorMessage = `API fetch failed: ${response.status} ${response.statusText}`;
-        console.warn(errorMessage);
-      }
-    } catch (apiError) {
-      errorMessage = `Error fetching from API: ${apiError.message}`;
-      console.error(errorMessage, apiError);
-    }
-    
-    // Process hardcoded temperature data
+                    // ++ Salinity ++
+                    const salinityValue = extractSalinityValue(reading);
+                    if (salinityValue !== null) {
+                        hasRealSalinity = true;
+                        if (!salinityLookup[yearMonth]) salinityLookup[yearMonth] = {};
+                        salinityLookup[yearMonth][stationId] = salinityValue;
+                    }
+                  } catch (parseError) { console.warn(`Error parsing reading for ${stationId}:`, parseError); }
+                });
+            });
+             // Average temps
+             const averagedTempData = {};
+             for (const yearMonth in tempLookup) {
+                const temps = tempLookup[yearMonth];
+                if (temps.length > 0) { averagedTempData[yearMonth] = temps.reduce((a, b) => a + b, 0) / temps.length; }
+             }
+             tempLookup = averagedTempData;
+         }
+      } else { errorMessage = `API fetch failed: ${response.status} ${response.statusText}`; console.warn(errorMessage); }
+    } catch (apiError) { errorMessage = `Error fetching from API: ${apiError.message}`; console.error(errorMessage, apiError); }
+
+    // Process hardcoded temperature data (keep as before)
     try {
-      const tempResult = processTemperatureData(
-        Array.from(timePointsSet), 
-        tempLookup
-      );
-      
+      const tempResult = processTemperatureData(Array.from(timePointsSet), tempLookup);
       if (tempResult) {
-        timePointsSet = new Set(tempResult.timePoints);
-        tempLookup = tempResult.temperatureData;
+         timePointsSet = new Set(tempResult.timePoints);
+         tempLookup = tempResult.temperatureData;
       }
-    } catch (tempError) {
-      console.warn("Error processing temperature data:", tempError);
-    }
-    
-    // Filter all time points to only include dates from Jan 1, 2000 onward
+    } catch (tempError) { console.warn("Error processing temperature data:", tempError); }
+
+    // Filter and sort time points (keep as before)
     const allTimePoints = Array.from(timePointsSet)
-      .filter(yearMonth => {
-        const [year, month] = yearMonth.split('-').map(Number);
-        return year >= 2000; // Year must be 2000 or later
-      })
+      .filter(yearMonth => { const [year] = yearMonth.split('-').map(Number); return year >= 2000; })
       .sort();
-    
-    console.log(`Filtered time points to include only dates from Jan 1, 2000 onward. Result: ${allTimePoints.length} time points`);
-    
-    // Generate density data for all stations and all time points
-    // This will ensure we have complete data, even if the API doesn't provide readings
-    if (processedStations.length > 0 && allTimePoints.length > 0) {
-      // Determine if we have real density readings
-      const hasRealDensityData = Object.values(densityLookup).some(
-        monthData => Object.keys(monthData).length > 0
-      );
-      
-      console.log(`Has real density data: ${hasRealDensityData}, timepoints with data: ${Object.keys(densityLookup).length}`);
-      
-      if (!hasRealDensityData) {
-        console.log("No real density data found. Generating synthetic data.");
-        densityLookup = generateMockDensityForStations(processedStations, allTimePoints, tempLookup);
-      } else {
-        console.log("Using real density data where available, supplementing with synthetic data.");
-        // Keep real data but fill in missing values with synthetic data
-        const syntheticData = generateMockDensityForStations(processedStations, allTimePoints, tempLookup);
-        
-        // Merge real data with synthetic data (real data takes precedence)
-        allTimePoints.forEach(yearMonth => {
-          if (!densityLookup[yearMonth]) {
-            densityLookup[yearMonth] = {};
-          }
-          
-          processedStations.forEach(station => {
-            if (densityLookup[yearMonth][station.id] === undefined && 
-                syntheticData[yearMonth] && 
-                syntheticData[yearMonth][station.id] !== undefined) {
-              densityLookup[yearMonth][station.id] = syntheticData[yearMonth][station.id];
-            }
-          });
-        });
-      }
-    }
-    
-    // Determine if we need to use mock data - check if we still have insufficient data
+
+    // --- Generate/Supplement Density & Salinity ---
     let usingMockData = false;
-    
-    // Special case: if we have no filtered stations, create mock stations with the same IDs
-    if (processedStations.length === 0) {
-      console.warn("No matching stations found for the specified site IDs. Creating mock stations with those IDs.");
-      usingMockData = true;
-      
-      // Create mock stations with the specified IDs
-      processedStations = ALLOWED_SITES.map((id, index) => {
-        // Distribute stations around the lake
-        const angle = (index / ALLOWED_SITES.length) * 2 * Math.PI;
-        const radius = 0.2;
-        const centerLon = -112.5;
-        const centerLat = 41.0;
-        
-        return {
-          id,
-          name: `Site ${id}`,
-          longitude: centerLon + radius * Math.cos(angle),
-          latitude: centerLat + radius * Math.sin(angle),
-          coordsSource: 'mock'
-        };
-      });
-      
-      // Generate mock data for these stations
-      if (allTimePoints.length < 10) {
-        // If we don't have enough time points either, use generated time points
-        // but ensure they start from Jan 2000
-        const mockTimePoints = [];
-        const startYear = 2000;
-        const endYear = 2025;
-        
-        for (let year = startYear; year <= endYear; year++) {
-          for (let month = 1; month <= 12; month++) {
-            // Skip future months in current year
-            if (year === endYear && month > new Date().getMonth() + 1) continue;
-            
-            const monthStr = month.toString().padStart(2, '0');
-            mockTimePoints.push(`${year}-${monthStr}`);
-          }
+    if (processedStations.length > 0 && allTimePoints.length > 0) {
+        if (!hasRealDensity) {
+            console.log("Generating synthetic density data.");
+            densityLookup = generateMockDensityForStations(processedStations, allTimePoints, tempLookup);
+            usingMockData = true; // Mark if density is fully mocked
+        } else {
+             console.log("Supplementing density data.");
+             const syntheticDensity = generateMockDensityForStations(processedStations, allTimePoints, tempLookup);
+             allTimePoints.forEach(yearMonth => {
+                if (!densityLookup[yearMonth]) densityLookup[yearMonth] = {};
+                processedStations.forEach(station => {
+                    if (densityLookup[yearMonth][station.id] === undefined &&
+                        syntheticDensity[yearMonth]?.[station.id] !== undefined) {
+                        densityLookup[yearMonth][station.id] = syntheticDensity[yearMonth][station.id];
+                    }
+                });
+             });
         }
-        
-        allTimePoints.push(...mockTimePoints.filter(tp => !allTimePoints.includes(tp)));
-        allTimePoints.sort();
-        
-        // Generate temps for the mock time points
-        mockTimePoints.forEach(yearMonth => {
-          if (!tempLookup[yearMonth]) {
-            const [year, month] = yearMonth.split('-').map(Number);
-            // Base temperature with seasonal variation
-            const baseTemp = 50 + Math.sin((month - 1) / 12 * 2 * Math.PI) * 25;
-            // Add yearly warming trend and random variation
-            const yearEffect = (year - startYear) * 0.2;
-            tempLookup[yearMonth] = baseTemp + yearEffect + (Math.random() - 0.5) * 5;
-          }
-        });
-      }
-      
-      // Generate density data for the mock stations
-      densityLookup = generateMockDensityForStations(processedStations, allTimePoints, tempLookup);
-    }
-    // Normal case: we have too few stations or time points
-    else if (processedStations.length < 3 || allTimePoints.length < 10) {
-      console.warn("Insufficient real data despite attempts. Using generated data instead.");
-      usingMockData = true;
-      
-      // Generate time points from Jan 2000 onward
-      const mockTimePoints = [];
-      const startYear = 2000;
-      const endYear = 2025;
-      
-      for (let year = startYear; year <= endYear; year++) {
-        for (let month = 1; month <= 12; month++) {
-          // Skip future months in current year
-          if (year === endYear && month > new Date().getMonth() + 1) continue;
-          
-          const monthStr = month.toString().padStart(2, '0');
-          mockTimePoints.push(`${year}-${monthStr}`);
+
+        // ++ Generate/Supplement Salinity ++
+        if (!hasRealSalinity) {
+            console.log("Generating synthetic salinity data.");
+            salinityLookup = generateMockSalinityForStations(processedStations, allTimePoints, tempLookup);
+             // Set usingMockData only if density is also mocked
+             if (!hasRealDensity) usingMockData = true;
+        } else {
+             console.log("Supplementing salinity data.");
+              const syntheticSalinity = generateMockSalinityForStations(processedStations, allTimePoints, tempLookup);
+              allTimePoints.forEach(yearMonth => {
+                 if (!salinityLookup[yearMonth]) salinityLookup[yearMonth] = {};
+                 processedStations.forEach(station => {
+                      if (salinityLookup[yearMonth][station.id] === undefined &&
+                          syntheticSalinity[yearMonth]?.[station.id] !== undefined) {
+                          salinityLookup[yearMonth][station.id] = syntheticSalinity[yearMonth][station.id];
+                      }
+                 });
+              });
         }
-      }
-      
-      // If the API was completely unsuccessful, include that in the error message
-      if (!apiSuccessful) {
-        errorMessage = errorMessage || "API data unavailable. Using simulated data.";
-      }
-      
-      // Generate mock data for the stations we have
-      const mockDensityData = generateMockDensityForStations(processedStations, mockTimePoints, tempLookup);
-      
-      return {
-        stations: processedStations,
-        timePoints: mockTimePoints,
-        densityData: mockDensityData,
-        temperatureData: tempLookup,
-        densityRange: [1.05, 1.20],
-        usingMockData: true,
-        error: errorMessage
-      };
     }
-    
-    // Use our final processed data
-    const finalTimePoints = allTimePoints.sort();
-    
-    // Handle edge case with no time points
-    if (finalTimePoints.length === 0) {
-      console.warn("No time points available. Creating default time points from 2000 onward.");
-      // Add monthly time points from Jan 2000 to current month
-      const startYear = 2000;
-      const endYear = new Date().getFullYear();
-      const endMonth = new Date().getMonth() + 1;
-      
-      for (let year = startYear; year <= endYear; year++) {
-        const monthLimit = (year === endYear) ? endMonth : 12;
-        for (let month = 1; month <= monthLimit; month++) {
-          const monthStr = month.toString().padStart(2, '0');
-          finalTimePoints.push(`${year}-${monthStr}`);
-          
-          // Initialize empty data structures
-          if (!densityLookup[`${year}-${monthStr}`]) {
-            densityLookup[`${year}-${monthStr}`] = {};
-          }
-          if (!tempLookup[`${year}-${monthStr}`]) {
-            // Create synthetic temperature
-            const baseTemp = 50 + Math.sin((month - 1) / 12 * 2 * Math.PI) * 25;
-            const yearEffect = (year - startYear) * 0.2;
-            tempLookup[`${year}-${monthStr}`] = baseTemp + yearEffect + (Math.random() - 0.5) * 5;
-          }
+
+    // --- Handle complete mock data generation if necessary ---
+    if (processedStations.length === 0 || allTimePoints.length === 0) {
+        // ... (This section is largely the same as before, ensure it generates both lookups) ...
+        console.warn("Insufficient initial data. Generating complete mock dataset.");
+        usingMockData = true;
+        errorMessage = errorMessage || "Data unavailable. Displaying simulated data.";
+         processedStations = ALLOWED_SITES.map((id, index) => ({
+             id, name: `Site ${id}`, longitude: -112.5 + 0.2 * Math.cos(index / ALLOWED_SITES.length * 2 * Math.PI),
+             latitude: 41.0 + 0.2 * Math.sin(index / ALLOWED_SITES.length * 2 * Math.PI), coordsSource: 'mock'
+         }));
+         const mockTimePoints = []; // generate points from 2000 to present
+         const startYear = 2000; const endYear = new Date().getFullYear(); const endMonth = new Date().getMonth() + 1;
+         for (let y = startYear; y <= endYear; y++) {
+            const mLimit = y === endYear ? endMonth : 12;
+            for (let m = 1; m <= mLimit; m++) mockTimePoints.push(`${y}-${m.toString().padStart(2, '0')}`);
+         }
+         allTimePoints.push(...mockTimePoints.filter(tp => !allTimePoints.includes(tp)));
+         allTimePoints.sort();
+         allTimePoints.forEach(tp => {
+            if (!tempLookup[tp]) {
+              const [y, m] = tp.split('-').map(Number);
+              tempLookup[tp] = 50 + Math.sin((m - 1) / 12 * 2 * Math.PI) * 25 + (y - startYear) * 0.2 + (Math.random() - 0.5) * 5;
+            }
+         });
+        densityLookup = generateMockDensityForStations(processedStations, allTimePoints, tempLookup);
+        salinityLookup = generateMockSalinityForStations(processedStations, allTimePoints, tempLookup);
+    }
+
+    // --- Calculate ranges for BOTH variables ---
+    const calculateRange = (dataLookup) => {
+        let range = [null, null];
+        const allValues = [];
+        if (dataLookup && typeof dataLookup === 'object') {
+            Object.values(dataLookup).forEach(monthData => {
+                if (monthData && typeof monthData === 'object') {
+                    Object.values(monthData).forEach(value => {
+                        if (typeof value === 'number' && !isNaN(value)) {
+                            allValues.push(value);
+                        }
+                    });
+                }
+            });
         }
-      }
-      
-      // Generate density data for all stations and time points
-      densityLookup = generateMockDensityForStations(processedStations, finalTimePoints, tempLookup);
-    }
-    
-    // Calculate density range
-    let densityRange = [1.0, 1.25]; // Default
-    
-    const allDensities = [];
-    Object.values(densityLookup).forEach(monthData => {
-      Object.values(monthData).forEach(density => {
-        if (typeof density === 'number' && !isNaN(density)) allDensities.push(density);
-      });
-    });
-    
-    if (allDensities.length > 0) {
-      const minD = Math.min(...allDensities); 
-      const maxD = Math.max(...allDensities);
-      densityRange = [
-        Math.max(1.0, minD * 0.99), 
-        Math.min(1.35, maxD * 1.01)
-      ];
-    }
-    
+        if (allValues.length > 0) {
+            const minVal = Math.min(...allValues);
+            const maxVal = Math.max(...allValues);
+            const padding = (maxVal - minVal) * 0.02 || (maxVal * 0.02); // Add padding, handle min=max
+            range = [Math.max(0, minVal - padding), maxVal + padding];
+            if (range[0] >= range[1]) { // Ensure range is valid if min=max
+               range[0] = Math.max(0, range[0] * 0.9);
+               range[1] = range[1] * 1.1 || 0.1; // Ensure max is slightly > min
+            }
+        }
+         if (range[0] === null) range = [0, 1]; // Basic default if no data
+        return range;
+    };
+
+    const densityRange = calculateRange(densityLookup);
+    const salinityRange = calculateRange(salinityLookup);
+
+    // Apply specific defaults if calculation resulted in [0, 1] or still null
+    const finalDensityRange = (densityRange[0] === 0 && densityRange[1] === 1) || densityRange[0] === null ? [1.0, 1.25] : densityRange;
+    const finalSalinityRange = (salinityRange[0] === 0 && salinityRange[1] === 1) || salinityRange[0] === null ? [50, 250] : salinityRange;
+
+
+    // --- Structure the return object ---
     return {
       stations: processedStations,
-      timePoints: finalTimePoints,
-      densityData: densityLookup,
-      temperatureData: tempLookup,
-      densityRange,
+      timePoints: allTimePoints,
+      allData: {
+          density: densityLookup,
+          salinity: salinityLookup,
+          temperature: tempLookup
+      },
+      dataRanges: {
+          density: finalDensityRange,
+          salinity: finalSalinityRange
+      },
       usingMockData,
       error: errorMessage
     };
-    
+
   } catch (err) {
-    console.error('Error loading or processing data:', err);
-    
-    // Use mock data as fallback, but ensure it's from Jan 2000 onward
-    console.log("Using mock data as fallback after error");
-    
-    // Create mock stations with the specified IDs
-    const mockStations = ALLOWED_SITES.map((id, index) => {
-      // Distribute stations around the lake
-      const angle = (index / ALLOWED_SITES.length) * 2 * Math.PI;
-      const radius = 0.2;
-      const centerLon = -112.5;
-      const centerLat = 41.0;
-      
-      return {
-        id,
-        name: `Site ${id}`,
-        longitude: centerLon + radius * Math.cos(angle),
-        latitude: centerLat + radius * Math.sin(angle),
-        coordsSource: 'mock'
-      };
-    });
-    
-    // Generate time points from Jan 2000 onward
-    const mockTimePoints = [];
-    const startYear = 2000;
-    const endYear = 2025;
-    const currentMonth = new Date().getMonth() + 1;
-    
-    for (let year = startYear; year <= endYear; year++) {
-      for (let month = 1; month <= 12; month++) {
-        // Skip future months in current year
-        if (year === endYear && month > currentMonth) continue;
-        
-        const monthStr = month.toString().padStart(2, '0');
-        mockTimePoints.push(`${year}-${monthStr}`);
-      }
-    }
-    
-    // Generate temperature data
-    const mockTempData = {};
-    mockTimePoints.forEach(yearMonth => {
-      const [year, month] = yearMonth.split('-').map(Number);
-      // Base temperature with seasonal variation
-      const baseTemp = 50 + Math.sin((month - 1) / 12 * 2 * Math.PI) * 25;
-      // Add yearly warming trend and random variation
-      const yearEffect = (year - startYear) * 0.2;
-      mockTempData[yearMonth] = baseTemp + yearEffect + (Math.random() - 0.5) * 5;
-    });
-    
-    // Generate density data
-    const mockDensityData = generateMockDensityForStations(mockStations, mockTimePoints, mockTempData);
-    
-    return {
-      stations: mockStations,
-      timePoints: mockTimePoints,
-      densityData: mockDensityData,
-      temperatureData: mockTempData,
-      densityRange: [1.05, 1.20],
-      usingMockData: true,
-      error: `Failed to load data: ${err.message}`
-    };
+    // --- Fallback ---
+     console.error('DataLoader Critical Error:', err);
+     const mockStations = ALLOWED_SITES.map((id, index) => ({ id, name: `Site ${id}`, longitude: -112.5 + 0.2 * Math.cos(index / ALLOWED_SITES.length * 2 * Math.PI), latitude: 41.0 + 0.2 * Math.sin(index / ALLOWED_SITES.length * 2 * Math.PI), coordsSource: 'mock' }));
+     const mockTimePoints = []; const startYear = 2000; const endYear = 2025; const currentMonth = new Date().getMonth() + 1;
+     for (let y = startYear; y <= endYear; y++) { for (let m = 1; m <= 12; m++) { if (y === endYear && m > currentMonth) continue; mockTimePoints.push(`${y}-${m.toString().padStart(2, '0')}`); } }
+     const mockTempData = {}; mockTimePoints.forEach(tp => { const [y, m] = tp.split('-').map(Number); mockTempData[tp] = 50 + Math.sin((m - 1) / 12 * 2 * Math.PI) * 25 + (y - startYear) * 0.2 + (Math.random() - 0.5) * 5; });
+     const mockDensityData = generateMockDensityForStations(mockStations, mockTimePoints, mockTempData);
+     const mockSalinityData = generateMockSalinityForStations(mockStations, mockTimePoints, mockTempData);
+
+     return {
+       stations: mockStations,
+       timePoints: mockTimePoints,
+       allData: { density: mockDensityData, salinity: mockSalinityData, temperature: mockTempData },
+       dataRanges: { density: [1.05, 1.20], salinity: [50, 250] },
+       usingMockData: true,
+       error: `Failed to load data: ${err.message}`
+     };
   }
 };
