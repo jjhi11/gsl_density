@@ -1,6 +1,6 @@
 import React from 'react'
 import './App.css'
-import GreatSaltLakeHeatmap from './components/GreatSaltLakeHeatmap.jsx'
+import GreatSaltLakeHeatmap from './components/GreatSaltLakeHeatmap';
 
 function App() {
   return (
