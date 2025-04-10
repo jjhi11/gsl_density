@@ -2,7 +2,7 @@
 
 This project displays a time-series visualization of chemical conditions (like density and salinity) in the Great Salt Lake using an interactive heatmap and station markers. It's built with React, Vite, and D3.js.
 
-**Live Demo:** [Link to your GitHub Pages site] *(Replace this with your actual deployed URL)*
+**Live Demo:** [GSL Density Heatmap Demo](https://jjhi11.github.io/gsl_density/)
 
 ## Features
 
