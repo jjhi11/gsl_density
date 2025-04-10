@@ -1,0 +1,125 @@
+{
+    "type": "FeatureCollection",
+    "features": [
+      {
+        "type": "Feature",
+        "properties": {
+          "id": "AS2",
+          "name": "AS2",
+          "description": "Sampling location in the northern arm of Great Salt Lake"
+        },
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -112.6,
+            41.05
+          ]
+        }
+      },
+      {
+        "type": "Feature",
+        "properties": {
+          "id": "RT4",
+          "name": "RT4",
+          "description": "Sampling location in the eastern portion of the lake"
+        },
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -112.3,
+            41.1
+          ]
+        }
+      },
+      {
+        "type": "Feature",
+        "properties": {
+          "id": "FB2",
+          "name": "FB2",
+          "description": "Sampling location in the western part of Great Salt Lake"
+        },
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -112.8,
+            40.8
+          ]
+        }
+      },
+      {
+        "type": "Feature",
+        "properties": {
+          "id": "RD2",
+          "name": "RD2",
+          "description": "Sampling location in the central portion of the lake"
+        },
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -112.45,
+            40.85
+          ]
+        }
+      },
+      {
+        "type": "Feature",
+        "properties": {
+          "id": "AIS",
+          "name": "AIS",
+          "description": "Sampling location in the northeast area of Great Salt Lake"
+        },
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -112.25,
+            41.01
+          ]
+        }
+      },
+      {
+        "type": "Feature",
+        "properties": {
+          "id": "LVG4",
+          "name": "LVG4",
+          "description": "Sampling location in the northwest area of Great Salt Lake"
+        },
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -112.75,
+            40.95
+          ]
+        }
+      },
+      {
+        "type": "Feature",
+        "properties": {
+          "id": "AC3",
+          "name": "AC3",
+          "description": "Sampling location in the southern arm of Great Salt Lake"
+        },
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -112.5,
+            40.75
+          ]
+        }
+      },
+      {
+        "type": "Feature",
+        "properties": {
+          "id": "SJ1",
+          "name": "SJ-1",
+          "description": "Sampling location in the east-central area of the lake"
+        },
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -112.35,
+            40.9
+          ]
+        }
+      }
+    ]
+  }
