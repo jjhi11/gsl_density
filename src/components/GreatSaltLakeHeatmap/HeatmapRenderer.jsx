@@ -35,6 +35,22 @@ const HeatmapRenderer = ({
     }
   }, [lakeData]);
 
+  // Format the date properly (month name and year)
+  const formatDateForTitle = (timePoint) => {
+    if (!timePoint) return '';
+    
+    const [year, monthNum] = timePoint.split('-');
+    const monthIndex = parseInt(monthNum) - 1;
+    
+    // Use month names
+    const monthNames = [
+      'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December'
+    ];
+    
+    return `${monthNames[monthIndex]} - ${year}`;
+  };
+
   // Main rendering function for the heatmap
   const renderHeatmap = useCallback(() => {
     // Prerequisites check
@@ -268,12 +284,12 @@ const HeatmapRenderer = ({
       // Add legend (Moved to separate component)
       const legendArea = svg.append("g").attr("transform", `translate(${MAP_WIDTH - 230}, ${MAP_HEIGHT - 50})`);
       
-      // Add title & info text
+      // Add title & info text with updated date format
       svg.append("text")
         .attr("x", MAP_WIDTH / 2).attr("y", 30)
         .attr("text-anchor", "middle")
         .style("font-size", "16px").style("font-weight", "bold")
-        .text(`Great Salt Lake Density - ${currentTimePoint}`);
+        .text(`Great Salt Lake Density - ${formatDateForTitle(currentTimePoint)}`);
         
       svg.append("text")
         .attr("x", MAP_WIDTH / 2).attr("y", 50)

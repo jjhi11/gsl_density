@@ -1,8 +1,8 @@
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback } from 'react';
 
 /**
- * Component for time controls with improved temporal visualization
- * Adds year markers and labels to the slider for better navigation
+ * Component for time controls with horizontal year markers
+ * No Tailwind CSS dependencies - using pure inline styles
  */
 const TimeControls = ({
   playing,
@@ -47,43 +47,36 @@ const TimeControls = ({
       setCurrentTimeIndex(newIndex);
     }
   }, [setCurrentTimeIndex, timePoints]);
-  
-  // Generate year markers for the slider
-  const yearMarkers = useMemo(() => {
+
+  // Calculate years to display as tick marks
+  const getYearTicks = () => {
+    // Early exit if no data
     if (!timePoints || timePoints.length === 0) return [];
     
-    return timePoints.reduce((markers, tp, index) => {
-      const year = tp.split('-')[0];
-      const month = tp.split('-')[1];
-      
-      // Add a marker at the first month of each year
-      if (month === '01') {
-        const position = (index / (timePoints.length - 1)) * 100;
-        markers.push({ year, index, position });
-      }
-      return markers;
-    }, []);
-  }, [timePoints]);
-  
-  // Determine which years to show labels for (to avoid overcrowding)
-  const yearsToShow = useMemo(() => {
     const years = new Set();
+    const ticks = [];
     
-    if (yearMarkers.length <= 10) {
-      // Show all years if there are 10 or fewer
-      yearMarkers.forEach(marker => years.add(marker.year));
-    } else {
-      // Show approximately every 3-4 years
-      const interval = Math.ceil(yearMarkers.length / 7); // Show about 7 labels total
-      yearMarkers.forEach((marker, i) => {
-        if (i % interval === 0 || i === yearMarkers.length - 1) {
-          years.add(marker.year);
-        }
-      });
+    // Find all unique years
+    timePoints.forEach(tp => {
+      const year = tp.split('-')[0];
+      years.add(year);
+    });
+    
+    // Sort years and keep a reasonable number (display every 4 years)
+    const sortedYears = Array.from(years).sort();
+    for (let i = 0; i < sortedYears.length; i += 4) {
+      ticks.push(sortedYears[i]);
     }
     
-    return years;
-  }, [yearMarkers]);
+    // Always include the last year
+    if (!ticks.includes(sortedYears[sortedYears.length - 1])) {
+      ticks.push(sortedYears[sortedYears.length - 1]);
+    }
+    
+    return ticks;
+  };
+
+  const yearTicks = getYearTicks();
 
   // Format date for display
   const formatTimePoint = (timePoint) => {
@@ -98,35 +91,103 @@ const TimeControls = ({
     });
   };
 
-  // Custom CSS for better slider appearance (inline styles)
-  const sliderStyles = {
-    WebkitAppearance: 'none',
-    appearance: 'none',
-    width: '100%',
-    height: '8px',
-    borderRadius: '9999px',
-    background: '#e2e8f0',
-    cursor: 'pointer',
-    outline: 'none'
+  // Styles without tailwind dependencies
+  const styles = {
+    container: {
+      marginTop: '16px',
+    },
+    controlsRow: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: '20px',
+      padding: '0 8px',
+    },
+    button: {
+      padding: '8px 16px',
+      borderRadius: '8px',
+      fontWeight: '500',
+      fontSize: '14px',
+      color: 'white',
+      backgroundColor: playing ? '#ef4444' : '#2563eb',
+      border: 'none',
+      cursor: 'pointer',
+      transition: 'background-color 0.2s',
+      boxShadow: '0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24)',
+    },
+    buttonDisabled: {
+      opacity: 0.5,
+      cursor: 'not-allowed',
+    },
+    timeDisplay: {
+      fontSize: '14px',
+      fontWeight: '500',
+      color: '#374151',
+      backgroundColor: 'white',
+      padding: '4px 12px',
+      borderRadius: '6px',
+      boxShadow: '0 1px 3px rgba(0,0,0,0.12)',
+      whiteSpace: 'nowrap',
+    },
+    yearTicksContainer: {
+      position: 'relative',
+      height: '24px',
+      marginTop: '16px',
+      marginBottom: '8px',
+      marginLeft: '2px',
+      marginRight: '2px',
+    },
+    yearTick: {
+      position: 'absolute',
+      fontSize: '12px',
+      color: '#4b5563',
+      transform: 'translateX(-50%)',
+      textAlign: 'center',
+    },
+    sliderContainer: {
+      padding: '0 2px',
+      marginBottom: '8px',
+    },
+    slider: {
+      WebkitAppearance: 'none',
+      appearance: 'none',
+      width: '100%',
+      height: '8px',
+      borderRadius: '9999px',
+      backgroundColor: '#e5e7eb',
+      outline: 'none',
+      cursor: 'pointer',
+    },
+    sliderDisabled: {
+      opacity: 0.5,
+      cursor: 'not-allowed',
+    },
+    timePointDisplay: {
+      textAlign: 'center',
+      fontSize: '14px',
+      color: '#4b5563',
+      marginTop: '8px',
+    }
   };
 
   return (
-    <div className="mt-4">
+    <div style={styles.container}>
       {/* Controls row */}
-      <div className="flex flex-col sm:flex-row justify-between items-center space-y-3 sm:space-y-0 px-2">
+      <div style={styles.controlsRow}>
         {/* Play/Pause Button */}
         <button
           onClick={togglePlay}
           disabled={isLoading || timePoints.length <= 1}
-          className={`px-4 py-2 rounded-lg font-medium transition-opacity text-sm sm:text-base ${
-            playing ? 'bg-red-500 hover:bg-red-600' : 'bg-blue-600 hover:bg-blue-700'
-          } text-white shadow disabled:opacity-50 disabled:cursor-not-allowed`}
+          style={{
+            ...styles.button,
+            ...(isLoading || timePoints.length <= 1 ? styles.buttonDisabled : {})
+          }}
         >
           {playing ? 'Pause' : 'Play Animation'}
         </button>
 
         {/* Time Point Display */}
-        <div className="text-xs sm:text-sm font-medium text-gray-700 bg-white px-3 py-1 rounded-md shadow whitespace-nowrap">
+        <div style={styles.timeDisplay}>
           {timePoints.length > 0 ? (
             `${formatTimePoint(currentTimePoint)} (${currentTimeIndex + 1}/${timePoints.length})`
           ) : (
@@ -135,50 +196,32 @@ const TimeControls = ({
         </div>
       </div>
 
-      {/* Time Slider with Year Markers */}
-      <div className="relative mt-6 mb-6 px-2">
-        {/* Year markers and labels */}
-        <div className="absolute left-0 right-0 top-0 h-16 -mt-14 pointer-events-none">
-          {yearMarkers.map(marker => (
-            <React.Fragment key={marker.year}>
-              {/* Year marker line */}
-              <div 
-                className="absolute h-6 w-px bg-gray-400 bottom-0"
-                style={{ left: `${marker.position}%` }}
-              />
-              
-              {/* Year label (only for selected years) */}
-              {yearsToShow.has(marker.year) && (
-                <div 
-                  className="absolute bottom-6 transform -translate-x-1/2 text-xs font-medium text-gray-600"
-                  style={{ left: `${marker.position}%` }}
-                >
-                  {marker.year}
-                </div>
-              )}
-            </React.Fragment>
-          ))}
-        </div>
-        
-        {/* Quarter markers */}
-        <div className="absolute left-0 right-0 top-0 h-4 -mt-2 pointer-events-none">
-          {timePoints.map((tp, idx) => {
-            const position = (idx / (timePoints.length - 1)) * 100;
-            const month = tp.split('-')[1];
-            // Only show ticks for April, July, October (1st month already has year marker)
-            const showTick = ['04', '07', '10'].includes(month);
-            
-            return showTick ? (
-              <div 
-                key={tp}
-                className="absolute h-3 w-px bg-gray-300 bottom-0"
-                style={{ left: `${position}%` }}
-              />
-            ) : null;
-          })}
-        </div>
-        
-        {/* The slider input */}
+      {/* Year Ticks */}
+      <div style={styles.yearTicksContainer}>
+        {yearTicks.map(year => {
+          // Find the first timepoint for this year
+          const index = timePoints.findIndex(tp => tp.startsWith(`${year}-`));
+          if (index === -1) return null;
+          
+          // Calculate the position as a percentage
+          const position = index / (timePoints.length - 1) * 100;
+          
+          return (
+            <div 
+              key={year} 
+              style={{
+                ...styles.yearTick,
+                left: `${position}%`
+              }}
+            >
+              {year}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Slider */}
+      <div style={styles.sliderContainer}>
         <input
           type="range"
           min="0"
@@ -188,24 +231,17 @@ const TimeControls = ({
           onMouseUp={handleSliderFinish}
           onTouchEnd={handleSliderFinish}
           disabled={isLoading || timePoints.length <= 1}
-          className="w-full accent-blue-600 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+          style={{
+            ...styles.slider,
+            ...(isLoading || timePoints.length <= 1 ? styles.sliderDisabled : {})
+          }}
           aria-valuetext={`Time point: ${currentTimePoint}`}
           aria-label="Time Point Slider"
-          style={sliderStyles}
-        />
-        
-        {/* Current position indicator */}
-        <div 
-          className="absolute top-0 w-px h-6 bg-blue-600 pointer-events-none -mt-2"
-          style={{ 
-            left: `${timePoints.length > 1 ? (currentTimeIndex / (timePoints.length - 1)) * 100 : 0}%`,
-            transform: 'translateX(-50%)'
-          }}
         />
       </div>
       
-      {/* Additional month/year display below slider */}
-      <div className="text-center text-sm text-gray-600 mt-1">
+      {/* Time point display below slider */}
+      <div style={styles.timePointDisplay}>
         {timePoints.length > 0 && formatTimePoint(currentTimePoint)}
       </div>
     </div>

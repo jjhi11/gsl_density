@@ -102,6 +102,47 @@ const GreatSaltLakeHeatmap = () => {
     };
   }, [playing, timePoints.length]);
 
+  /**
+   * Custom data information component with properly aligned numbered list
+   */
+  const DataInformation = () => {
+    const styles = {
+      container: {
+        marginTop: '1rem',
+        marginBottom: '1rem',
+        padding: '0.75rem',
+        fontSize: '0.875rem',
+        color: '#374151',
+        backgroundColor: '#f9fafb',
+        borderRadius: '0.5rem'
+      },
+      heading: {
+        fontWeight: '500',
+        marginBottom: '0.25rem'
+      },
+      list: {
+        listStylePosition: 'inside', // Keep the numbers inside the text block
+        paddingLeft: 0,
+        marginTop: '0.25rem',
+        textAlign: 'left'
+      },
+      listItem: {
+        marginBottom: '0.25rem'
+      }
+    };
+
+    return (
+      <div style={styles.container}>
+        <p style={styles.heading}>Data Sources:</p>
+        <ol style={styles.list}>
+          <li style={styles.listItem}>Temperature data from uploaded Great Salt Lake historical records (2000-2025)</li>
+          <li style={styles.listItem}>Density values calculated from salinity measurements or simulated when unavailable</li>
+          <li style={styles.listItem}>Lake outline from Utah Geological Survey or simplified approximation</li>
+        </ol>
+      </div>
+    );
+  };
+
   // --- Render ---
   return (
     <div className="w-full max-w-6xl mx-auto p-4 sm:p-6 bg-white rounded-lg shadow-lg">
@@ -159,17 +200,10 @@ const GreatSaltLakeHeatmap = () => {
         />
       </div>
 
-      {/* Data Information */}
-      <div className="mt-4 mb-4 p-3 text-sm text-gray-700 bg-gray-50 rounded-lg">
-        <p className="font-medium mb-1">Data Sources:</p>
-        <ol className="list-decimal pl-5 space-y-1">
-          <li>Temperature data from uploaded Great Salt Lake historical records (2000-2025)</li>
-          <li>Density values calculated from salinity measurements or simulated when unavailable</li>
-          <li>Lake outline from Utah Geological Survey or simplified approximation</li>
-        </ol>
-      </div>
+      {/* Data Information with fixed list alignment */}
+      <DataInformation />
 
-      {/* Interpretation Guide */}
+      {/* Interpretation Guide with fixed bullet alignment */}
       <InfoPanel />
     </div>
   );
