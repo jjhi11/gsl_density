@@ -40,34 +40,3 @@ This project displays a time-series visualization of chemical conditions (like d
 * **Temperature Data:** Hardcoded historical data (originally from `Great Salt Lake Temperature Data (2000-2025).txt`) processed in `src/components/GreatSaltLakeHeatmap/TemperatureData.js`.
 * **Mock/Simulated Data:** Generated within `src/components/GreatSaltLakeHeatmap/DataLoader.js` if primary sources fail or provide insufficient data points.
 
-## Setup and Running Locally
-
-1.  **Clone the repository:**
-    ```bash
-    git clone [https://github.com/jjhi11/gsl_density.git](https://github.com/jjhi11/gsl_density.git)
-    cd gsl_density
-    ```
-2.  **Install dependencies:**
-    ```bash
-    npm install
-    ```
-3.  **Run the development server:**
-    ```bash
-    npm run dev
-    ```
-    This will start the Vite development server, usually available at `http://localhost:5173` (or the next available port).
-
-## Deployment
-
-This project uses the `gh-pages` package to deploy the built application to the `gh-pages` branch, which can be served using GitHub Pages.
-
-1.  **Build the project:**
-    ```bash
-    npm run build
-    ```
-    This creates the static files in the `dist` directory.
-2.  **Deploy to GitHub Pages:**
-    ```bash
-    npm run deploy
-    ```
-    This command (defined in `package.json`) pushes the contents of the `dist` folder to the `gh-pages` branch on your GitHub repository. Ensure your GitHub Pages settings are configured to deploy from the `gh-pages` branch.
