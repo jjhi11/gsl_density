@@ -5,4 +5,8 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   base: '/gsl_density',
+  build: {
+    outDir: 'dist', // This defines the output directory for the build
+    emptyOutDir: true // This clears the directory before building
+  }
 })
