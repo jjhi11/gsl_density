@@ -2,7 +2,7 @@
 import React, { useRef, useMemo, useEffect, useCallback } from 'react';
 import * as d3 from 'd3';
 import Legend from './Legend';
-import { calculateAverageDensity } from './utils';
+import { calculateAverageDensity } from './utils'; // Keep utility
 
 // Constants
 const MAP_WIDTH = 800;
@@ -12,7 +12,7 @@ const MAP_HEIGHT = 500;
  * Component responsible for rendering the D3 heatmap visualization
  */
 const HeatmapRenderer = ({
-  lakeData,
+  lakeData, // Now potentially a FeatureCollection with multiple features
   stations,
   // Receive generic props
   currentDataForTimepoint,
@@ -24,9 +24,13 @@ const HeatmapRenderer = ({
 }) => {
   const svgRef = useRef(null);
 
-  // Create the D3 projection based on the lake data
+  // Projection uses the whole FeatureCollection bounds
   const projection = useMemo(() => {
-    if (!lakeData) return null;
+    // Add check for features array existence
+    if (!lakeData || !lakeData.features || lakeData.features.length === 0) {
+        console.warn("Lake data is missing or has no features for projection.");
+        return null;
+    }
     try {
       return d3.geoMercator()
         .fitExtent([[20, 20], [MAP_WIDTH - 20, MAP_HEIGHT - 20]], lakeData);
@@ -48,49 +52,69 @@ const HeatmapRenderer = ({
   // Main rendering function for the heatmap
   const renderHeatmap = useCallback(() => {
     // Prerequisites check
-    if (!svgRef.current || !lakeData || !projection || !stations || !currentConfig) {
+    if (!svgRef.current || !lakeData || !lakeData.features || lakeData.features.length === 0 || !projection || !stations || !currentConfig) {
         console.log("HeatmapRenderer prerequisites not met - skipping render.");
         return;
     }
 
-    console.log(`Rendering heatmap for: ${currentConfig.label} - ${currentTimePoint}`);
+    console.log(`Rendering SEPARATE heatmaps for: ${currentConfig.label} - ${currentTimePoint}`);
 
     const svg = d3.select(svgRef.current);
     svg.selectAll("*").remove(); // Clear previous render
 
     // Get current data average
     const avgValue = calculateAverageDensity(currentDataForTimepoint);
+    const currentTemp = currentTemperature; // Use the correctly passed prop
 
-    // Create canvas for heatmap rendering
-    const canvas = document.createElement('canvas');
-    canvas.width = MAP_WIDTH;
-    canvas.height = MAP_HEIGHT;
-    const ctx = canvas.getContext('2d');
+    // --- Canvases for separate arms ---
+    const northCanvas = document.createElement('canvas'); northCanvas.width = MAP_WIDTH; northCanvas.height = MAP_HEIGHT;
+    const northCtx = northCanvas.getContext('2d');
+    const southCanvas = document.createElement('canvas'); southCanvas.width = MAP_WIDTH; southCanvas.height = MAP_HEIGHT;
+    const southCtx = southCanvas.getContext('2d');
+    // ---
 
-    // Define path generator
     const path = d3.geoPath().projection(projection);
 
-    // --- 1. Define Clip Path using Lake Outline ---
-    try {
-        svg.append("defs")
-           .append("clipPath")
-           .attr("id", "lake-clip") // Unique ID for the clip path
-           .append("path")
-           .datum(lakeData)
-           .attr("d", path);
-    } catch (pathError) {
-        console.error("Error creating clip path from lake boundary:", pathError);
-        // Optionally draw a fallback rectangle clip path
-        svg.append("defs")
-           .append("clipPath")
-           .attr("id", "lake-clip")
-           .append("rect")
-           .attr("x", 0).attr("y", 0)
-           .attr("width", MAP_WIDTH).attr("height", MAP_HEIGHT);
-        svg.append("text") // Add error message to SVG
-           .attr("x", 10).attr("y", 20)
-           .text("Error: Failed to create lake clip path.")
-           .attr("fill", "red");
+    // --- 1. Define MULTIPLE Clip Paths and identify features ---
+    const defs = svg.append("defs");
+    const clipPaths = {}; // Store { clipId: featureName }
+    let northClipId = null;
+    let southClipId = null;
+
+    lakeData.features.forEach((feature, index) => {
+        // Create a unique ID based on name or index, ensure it's valid for CSS ID
+        const name = (feature.properties?.name || `feature-${index}`)
+                        .toLowerCase()
+                        .replace(/[^a-z0-9]+/g, '-') // Replace non-alphanumeric with hyphen
+                        .replace(/^-|-$/g, ''); // Trim leading/trailing hyphens
+        const clipId = `lake-clip-${name || index}`; // Fallback to index if name becomes empty
+        clipPaths[clipId] = name; // Store the cleaned name or index identifier
+
+        // Identify North/South based on properties.name (case-insensitive)
+        if (name.includes('north')) { // Simple check
+            northClipId = clipId;
+        } else if (name.includes('south')) { // Simple check
+            southClipId = clipId;
+        } else {
+            console.warn(`Feature ${index} name "${name}" not identified as North or South.`);
+            // Assign based on index as a fallback? Or ignore? For now, ignore for clipping heatmap.
+        }
+
+        try {
+            defs.append("clipPath")
+                .attr("id", clipId)
+                .append("path")
+                .datum(feature) // Use individual feature
+                .attr("d", path);
+        } catch (pathError) {
+            console.error(`Error creating clip path for feature ${index} (${name}):`, pathError);
+             defs.append("clipPath").attr("id", clipId).append("rect").attr("width", 0).attr("height", 0); // Empty fallback
+        }
+    });
+    console.log("Generated clip path IDs:", clipPaths, { northClipId, southClipId });
+    if (!northClipId || !southClipId) {
+        console.error("Could not identify both North and South Arm clip paths! Heatmap clipping might fail.");
+        // Consider adding a visual error/warning on the SVG itself
     }
     // --- End Clip Path Definition ---
 
@@ -98,83 +122,146 @@ const HeatmapRenderer = ({
     // --- 2. Create Color Scale ---
     const colorInterpolatorName = currentConfig.interpolate || 'interpolateBlues';
     const colorInterpolator = d3[colorInterpolatorName] || d3.interpolateBlues;
-    const colorScale = d3.scaleSequential(colorInterpolator)
-        .domain([currentRange[1], currentRange[0]]); // Reversed for Blues, Greens etc.
+    const colorScale = d3.scaleSequential(colorInterpolator).domain([currentRange[1], currentRange[0]]);
 
 
-    // --- 3. Prepare Data Points ---
-    const dataPoints = stations.map(station => {
-      const value = currentDataForTimepoint[station.id];
-      if (value !== undefined && value !== null && !isNaN(station.longitude) && !isNaN(station.latitude)) {
-        try {
-          const projected = projection([station.longitude, station.latitude]);
-          if (projected && !isNaN(projected[0]) && !isNaN(projected[1])) {
-            return { x: projected[0], y: projected[1], value: value };
-          }
-        } catch (e) { console.debug(`Projection error for station ${station.id}`); }
-      }
-      return null;
-    }).filter(p => p !== null);
+    // --- 3. Prepare SEPARATE Data Points ---
+    const northArmStationIds = ['RD2', 'SJ-1', 'RD1', 'LVG4']; // From user input
+    const northDataPoints = [];
+    const southDataPoints = [];
+
+    stations.forEach(station => {
+        const value = currentDataForTimepoint[station.id];
+        // Check if value and coordinates are valid numbers
+        if (value !== undefined && value !== null && typeof value === 'number' && !isNaN(value) &&
+            !isNaN(station.longitude) && !isNaN(station.latitude)) {
+            try {
+                const projected = projection([station.longitude, station.latitude]);
+                // Check if projection returned valid coordinates
+                if (projected && !isNaN(projected[0]) && !isNaN(projected[1])) {
+                    const point = { x: projected[0], y: projected[1], value: value };
+                    if (northArmStationIds.includes(station.id)) {
+                        northDataPoints.push(point);
+                    } else { // Assume all others are south arm
+                        southDataPoints.push(point);
+                    }
+                }
+            } catch (e) { console.debug(`Projection error for station ${station.id}`); }
+        }
+    });
+    console.log(`North Arm data points: ${northDataPoints.length}, South Arm data points: ${southDataPoints.length}`);
+    // --- End Data Point Separation ---
 
 
-    // --- 4. Generate Heatmap on Canvas (using IDW) ---
-    if (dataPoints.length > 0) {
-      const cellSize = 5; // Adjust for resolution vs performance
-      const gridCols = Math.ceil(MAP_WIDTH / cellSize);
-      const gridRows = Math.ceil(MAP_HEIGHT / cellSize);
+    // --- 4. Generate Heatmap on SEPARATE Canvases ---
+    const cellSize = 5; // Grid resolution
+    const gridCols = Math.ceil(MAP_WIDTH / cellSize);
+    const gridRows = Math.ceil(MAP_HEIGHT / cellSize);
+    let northCellsDrawn = 0;
+    let southCellsDrawn = 0;
 
-      // Inverse Distance Weighting function
-      const idw = (x, y, points, power = 2) => {
+    // Inverse Distance Weighting function
+    const idw = (x, y, points, power = 2) => {
         let numerator = 0;
         let denominator = 0;
         let exactMatchValue = null;
-        points.forEach(point => {
-          const distanceSq = Math.pow(x - point.x, 2) + Math.pow(y - point.y, 2);
-          if (distanceSq === 0) { exactMatchValue = point.value; return; }
-          const weight = 1 / Math.pow(distanceSq, power / 2);
-          numerator += point.value * weight;
-          denominator += weight;
-        });
+        for (const point of points) { // Use for...of for potential early exit
+            const distanceSq = Math.pow(x - point.x, 2) + Math.pow(y - point.y, 2);
+            if (distanceSq < 0.0001) { // Threshold for exact match
+                exactMatchValue = point.value;
+                break; // Found exact match, no need to check others
+            }
+            const weight = 1 / Math.pow(distanceSq, power / 2);
+            numerator += point.value * weight;
+            denominator += weight;
+        }
         if (exactMatchValue !== null) return exactMatchValue;
         return denominator === 0 ? null : numerator / denominator;
-      };
+    };
 
-      // Fill canvas grid cells
-      let cellsDrawn = 0;
-      for (let col = 0; col < gridCols; col++) {
-        for (let row = 0; row < gridRows; row++) {
-          const cellX = col * cellSize + cellSize / 2;
-          const cellY = row * cellSize + cellSize / 2;
-          try {
-            const interpolatedValue = idw(cellX, cellY, dataPoints);
-            if (interpolatedValue !== null) {
-              ctx.fillStyle = colorScale(interpolatedValue);
-              ctx.fillRect(col * cellSize, row * cellSize, cellSize, cellSize);
-              cellsDrawn++;
+    // Only perform grid calculation if there are points in at least one arm
+    if (northDataPoints.length > 0 || southDataPoints.length > 0) {
+        for (let col = 0; col < gridCols; col++) {
+            for (let row = 0; row < gridRows; row++) {
+                const cellX = col * cellSize + cellSize / 2;
+                const cellY = row * cellSize + cellSize / 2;
+
+                // Interpolate for North Arm if points exist
+                if (northDataPoints.length > 0) {
+                    try {
+                        const interpolatedNorth = idw(cellX, cellY, northDataPoints);
+                        if (interpolatedNorth !== null) {
+                            northCtx.fillStyle = colorScale(interpolatedNorth);
+                            northCtx.fillRect(col * cellSize, row * cellSize, cellSize, cellSize);
+                            northCellsDrawn++;
+                        }
+                    } catch { /* ignore interpolation errors */ }
+                }
+
+                // Interpolate for South Arm if points exist
+                if (southDataPoints.length > 0) {
+                     try {
+                        const interpolatedSouth = idw(cellX, cellY, southDataPoints);
+                        if (interpolatedSouth !== null) {
+                            southCtx.fillStyle = colorScale(interpolatedSouth);
+                            southCtx.fillRect(col * cellSize, row * cellSize, cellSize, cellSize);
+                            southCellsDrawn++;
+                        }
+                    } catch { /* ignore interpolation errors */ }
+                }
             }
-          } catch { continue; }
         }
-      }
-       console.log(`Drew ${cellsDrawn} cells on the heatmap canvas.`);
+    }
+    console.log(`Drew ${northCellsDrawn} North cells, ${southCellsDrawn} South cells.`);
+    // --- End Canvas Generation ---
 
-      // --- 5. Render Heatmap Canvas as SVG Image with Clipping ---
-      svg.append("image")
-         .attr("x", 0)
-         .attr("y", 0)
-         .attr("width", MAP_WIDTH)
-         .attr("height", MAP_HEIGHT)
-         .attr("preserveAspectRatio", "none")
-         .attr("clip-path", "url(#lake-clip)") // Apply the clip path
-         .attr("href", canvas.toDataURL());
 
-    } else {
-      // Show message if no data points for interpolation
-      svg.append("text")
-         .attr("x", MAP_WIDTH / 2).attr("y", MAP_HEIGHT / 2)
-         .attr("text-anchor", "middle").attr("fill", "#aaa")
-         .text(`No ${currentConfig.label || 'data'} available for heatmap interpolation this month`);
+    // --- 5. Render Heatmap Images with Clipping ---
+    const northCanvasHasData = northCellsDrawn > 0;
+    const southCanvasHasData = southCellsDrawn > 0;
+
+    // Render North Arm Image if data exists and clip path was found
+    if (northCanvasHasData && northClipId) {
+        svg.append("image")
+           .attr("x", 0).attr("y", 0)
+           .attr("width", MAP_WIDTH).attr("height", MAP_HEIGHT)
+           .attr("preserveAspectRatio", "none")
+           .attr("clip-path", `url(#${northClipId})`)
+           .attr("href", northCanvas.toDataURL());
+    }
+
+    // Render South Arm Image if data exists and clip path was found
+    if (southCanvasHasData && southClipId) {
+         svg.append("image")
+           .attr("x", 0).attr("y", 0)
+           .attr("width", MAP_WIDTH).attr("height", MAP_HEIGHT)
+           .attr("preserveAspectRatio", "none")
+           .attr("clip-path", `url(#${southClipId})`)
+           .attr("href", southCanvas.toDataURL());
+    }
+
+    // Display message if neither heatmap rendered data
+    if (!northCanvasHasData && !southCanvasHasData) {
+         svg.append("text")
+            .attr("x", MAP_WIDTH / 2).attr("y", MAP_HEIGHT / 2)
+            .attr("text-anchor", "middle").attr("fill", "#aaa")
+            .text(`No ${currentConfig.label || 'data'} available for heatmap this month`);
     }
     // --- End Heatmap Rendering ---
+
+
+    // --- Optional: Draw Outlines AFTER heatmap images ---
+     svg.append("g")
+        .attr("class", "lake-outlines")
+        .selectAll("path")
+        .data(lakeData.features)
+        .join("path")
+        .attr("d", path)
+        .attr("fill", "none")
+        .attr("stroke", "#66a9c9") // Outline color
+        .attr("stroke-width", 1)
+        .attr("vector-effect", "non-scaling-stroke");
+    // --- End Outlines ---
 
 
     // --- 6. Draw Stations (On Top) ---
@@ -187,8 +274,9 @@ const HeatmapRenderer = ({
 
         const [x, y] = projected;
         const value = currentDataForTimepoint[station.id];
-        const hasData = value !== undefined && value !== null;
-        const fillColor = hasData ? colorScale(value) : "#ccc"; // Color point by same scale
+        const hasData = value !== undefined && value !== null && typeof value === 'number' && !isNaN(value);
+        // Use color scale even for points for consistency
+        const fillColor = hasData ? colorScale(value) : "#ccc";
 
         const g = stationGroup.append("g").attr("transform", `translate(${x}, ${y})`);
         g.append("circle")
@@ -202,14 +290,17 @@ const HeatmapRenderer = ({
           : `${station.name}: No data`;
         g.append("title").text(tooltipText);
 
+        // Station Label (with previous adjustments)
         let labelX = 0; let labelY = 15;
-        if (station.id === 'SJ-1') { labelX = -8; labelY = 18; }
-        else if (station.id === 'RD1') { labelX = 8; labelY = 18; }
+        if (station.id === 'SJ-1') { labelX = -2; labelY = 18; }
+        else if (station.id === 'RD1') { labelX = 8; labelY = -10; }
 
         g.append("text")
          .attr("x", labelX).attr("y", labelY)
          .attr("text-anchor", "middle")
-         .style("font-size", "10px").style("font-family", "sans-serif").style("fill", "#333")
+         .style("font-size", "10px")
+         .style("font-family", "sans-serif")
+         .style("fill", "#333")
          .text(station.name);
 
       } catch (e) { console.debug(`Error drawing station ${station.id}`); }
@@ -241,30 +332,30 @@ const HeatmapRenderer = ({
     });
     // --- End Title/Info/Legend ---
 
-  }, [
+  }, [ // Keep dependencies comprehensive
        lakeData, stations, projection, currentTimePoint, currentDataForTimepoint,
-       currentTemperature, currentRange, currentConfig, isLoading, formatDateForTitle // Keep dependencies updated
+       currentTemperature, currentRange, currentConfig, isLoading, formatDateForTitle
   ]);
 
   // Effect to trigger rendering
   useEffect(() => {
-    if (projection && !isLoading && lakeData && currentConfig) {
+    // Check all potentially changing dependencies that affect rendering
+    if (projection && !isLoading && lakeData && currentConfig && stations) {
       const animationId = requestAnimationFrame(() => { renderHeatmap(); });
       return () => cancelAnimationFrame(animationId);
     }
-     // Add lakeData as dependency
-  }, [currentTimePoint, isLoading, lakeData, projection, renderHeatmap, currentConfig]);
+  }, [currentTimePoint, isLoading, lakeData, projection, renderHeatmap, currentConfig, stations]); // Include stations here
+
 
   // SVG container
   return (
     <div className="relative border rounded-lg bg-gray-100 overflow-hidden mb-4 shadow aspect-w-16 aspect-h-10 sm:aspect-h-9">
-      {/* The SVG background color is set here, or defaults */}
       <svg
         ref={svgRef}
         viewBox={`0 0 ${MAP_WIDTH} ${MAP_HEIGHT}`}
         preserveAspectRatio="xMidYMid meet"
         className="absolute top-0 left-0 w-full h-full block"
-        style={{ backgroundColor: "#f0f7fa" }} // Optional light blue background for area outside lake clip
+        style={{ backgroundColor: "#f0f7fa" }} // Base background if needed
       />
     </div>
   );
