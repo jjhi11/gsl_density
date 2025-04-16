@@ -1,8 +1,9 @@
 // HeatmapRenderer.jsx
-import React, { useRef, useMemo, useEffect, useCallback } from 'react';
+import React, { useRef, useMemo, useEffect, useCallback, useState } from 'react';
 import * as d3 from 'd3';
 import Legend from './Legend';
-import { calculateAverageDensity } from './utils'; // Keep utility
+import { calculateAverageDensity } from './utils';
+import InteractiveStationMarker from './InteractiveStationMarker'; // Import new component
 
 // Constants
 const MAP_WIDTH = 800;
@@ -21,9 +22,11 @@ const HeatmapRenderer = ({
   currentConfig, // Contains { key, label, unit, precision, interpolate, defaultRange }
   currentTimePoint,
   isLoading,
-  onStationClick
+  onStationClick,
+  hideTitle = false // New prop for comparison view
 }) => {
   const svgRef = useRef(null);
+  const [stationData, setStationData] = useState([]);
 
   // Projection uses the whole FeatureCollection bounds
   const projection = useMemo(() => {
@@ -120,10 +123,18 @@ const HeatmapRenderer = ({
     // --- End Clip Path Definition ---
 
 
-    // --- 2. Create Color Scale ---
+    // --- 2. Create Color Scale with increased contrast for accessibility ---
     const colorInterpolatorName = currentConfig.interpolate || 'interpolateBlues';
     const colorInterpolator = d3[colorInterpolatorName] || d3.interpolateBlues;
-    const colorScale = d3.scaleSequential(colorInterpolator).domain([currentRange[1], currentRange[0]]);
+    
+    // Enhanced color scale with better contrast
+    const colorScale = d3.scaleSequential()
+      .domain([currentRange[1], currentRange[0]])
+      .interpolator(t => {
+        // Enhance contrast by adjusting the input to the interpolator
+        const adjustedT = Math.pow(t, 1.2); // Increase contrast
+        return colorInterpolator(adjustedT);
+      });
 
 
     // --- 3. Prepare SEPARATE Data Points ---
@@ -195,179 +206,167 @@ const HeatmapRenderer = ({
                             northCtx.fillStyle = colorScale(interpolatedNorth);
                             northCtx.fillRect(col * cellSize, row * cellSize, cellSize, cellSize);
                             northCellsDrawn++;
-                        }
-                    } catch { /* ignore interpolation errors */ }
-                }
+                    }
+                } catch (e) { /* ignore interpolation errors */ }
+            }
 
-                // Interpolate for South Arm if points exist
-                if (southDataPoints.length > 0) {
-                     try {
-                        const interpolatedSouth = idw(cellX, cellY, southDataPoints);
-                        if (interpolatedSouth !== null) {
-                            southCtx.fillStyle = colorScale(interpolatedSouth);
-                            southCtx.fillRect(col * cellSize, row * cellSize, cellSize, cellSize);
-                            southCellsDrawn++;
-                        }
-                    } catch { /* ignore interpolation errors */ }
-                }
+            // Interpolate for South Arm if points exist
+            if (southDataPoints.length > 0) {
+                try {
+                    const interpolatedSouth = idw(cellX, cellY, southDataPoints);
+                    if (interpolatedSouth !== null) {
+                        southCtx.fillStyle = colorScale(interpolatedSouth);
+                        southCtx.fillRect(col * cellSize, row * cellSize, cellSize, cellSize);
+                        southCellsDrawn++;
+                    }
+                } catch (e) { /* ignore interpolation errors */ }
             }
         }
     }
-    console.log(`Drew ${northCellsDrawn} North cells, ${southCellsDrawn} South cells.`);
-    // --- End Canvas Generation ---
+}
+console.log(`Drew ${northCellsDrawn} North cells, ${southCellsDrawn} South cells.`);
+// --- End Canvas Generation ---
 
 
-    // --- 5. Render Heatmap Images with Clipping ---
-    const northCanvasHasData = northCellsDrawn > 0;
-    const southCanvasHasData = southCellsDrawn > 0;
+// --- 5. Render Heatmap Images with Clipping ---
+const northCanvasHasData = northCellsDrawn > 0;
+const southCanvasHasData = southCellsDrawn > 0;
 
-    // Render North Arm Image if data exists and clip path was found
-    if (northCanvasHasData && northClipId) {
-        svg.append("image")
-           .attr("x", 0).attr("y", 0)
-           .attr("width", MAP_WIDTH).attr("height", MAP_HEIGHT)
-           .attr("preserveAspectRatio", "none")
-           .attr("clip-path", `url(#${northClipId})`)
-           .attr("href", northCanvas.toDataURL());
-    }
+// Render North Arm Image if data exists and clip path was found
+if (northCanvasHasData && northClipId) {
+    svg.append("image")
+       .attr("x", 0).attr("y", 0)
+       .attr("width", MAP_WIDTH).attr("height", MAP_HEIGHT)
+       .attr("preserveAspectRatio", "none")
+       .attr("clip-path", `url(#${northClipId})`)
+       .attr("href", northCanvas.toDataURL());
+}
 
-    // Render South Arm Image if data exists and clip path was found
-    if (southCanvasHasData && southClipId) {
-         svg.append("image")
-           .attr("x", 0).attr("y", 0)
-           .attr("width", MAP_WIDTH).attr("height", MAP_HEIGHT)
-           .attr("preserveAspectRatio", "none")
-           .attr("clip-path", `url(#${southClipId})`)
-           .attr("href", southCanvas.toDataURL());
-    }
+// Render South Arm Image if data exists and clip path was found
+if (southCanvasHasData && southClipId) {
+     svg.append("image")
+       .attr("x", 0).attr("y", 0)
+       .attr("width", MAP_WIDTH).attr("height", MAP_HEIGHT)
+       .attr("preserveAspectRatio", "none")
+       .attr("clip-path", `url(#${southClipId})`)
+       .attr("href", southCanvas.toDataURL());
+}
 
-    // Display message if neither heatmap rendered data
-    if (!northCanvasHasData && !southCanvasHasData) {
-         svg.append("text")
-            .attr("x", MAP_WIDTH / 2).attr("y", MAP_HEIGHT / 2)
-            .attr("text-anchor", "middle").attr("fill", "#aaa")
-            .text(`No ${currentConfig.label || 'data'} available for heatmap this month`);
-    }
-    // --- End Heatmap Rendering ---
-
-
-    // --- Optional: Draw Outlines AFTER heatmap images ---
-     svg.append("g")
-        .attr("class", "lake-outlines")
-        .selectAll("path")
-        .data(lakeData.features)
-        .join("path")
-        .attr("d", path)
-        .attr("fill", "none")
-        .attr("stroke", "#66a9c9") // Outline color
-        .attr("stroke-width", 1)
-        .attr("vector-effect", "non-scaling-stroke");
-    // --- End Outlines ---
+// Display message if neither heatmap rendered data
+if (!northCanvasHasData && !southCanvasHasData) {
+     svg.append("text")
+        .attr("x", MAP_WIDTH / 2).attr("y", MAP_HEIGHT / 2)
+        .attr("text-anchor", "middle").attr("fill", "#aaa")
+        .text(`No ${currentConfig.label || 'data'} available for heatmap this month`);
+}
+// --- End Heatmap Rendering ---
 
 
-    // --- 6. Draw Stations (On Top) ---
-    const stationGroup = svg.append("g").attr("class", "stations");
-    stations.forEach(station => {
-      if (isNaN(station.longitude) || isNaN(station.latitude)) return;
-      try {
-        const projected = projection([station.longitude, station.latitude]);
-        if (!projected || isNaN(projected[0]) || isNaN(projected[1])) return;
-  
-        const [x, y] = projected;
-        const value = currentDataForTimepoint[station.id];
-        const hasData = value !== undefined && value !== null && typeof value === 'number' && !isNaN(value);
-        const fillColor = hasData ? colorScale(value) : "#ccc";
-  
-        // Update the group to add cursor style and click handler
-        const g = stationGroup.append("g")
-          .attr("transform", `translate(${x}, ${y})`)
-          .attr("class", "station")
-          .style("cursor", "pointer");
-        
-        // Add click handler if onStationClick prop is provided
-        if (onStationClick) {
-          g.on("click", () => onStationClick(station));
-        }
-        g.append("circle")
-         .attr("r", 5)
-         .attr("fill", fillColor)
-         .attr("stroke", "#333")
-         .attr("stroke-width", 1);
+// --- Optional: Draw Outlines AFTER heatmap images ---
+ svg.append("g")
+    .attr("class", "lake-outlines")
+    .selectAll("path")
+    .data(lakeData.features)
+    .join("path")
+    .attr("d", path)
+    .attr("fill", "none")
+    .attr("stroke", "#66a9c9") // Outline color
+    .attr("stroke-width", 1)
+    .attr("vector-effect", "non-scaling-stroke");
+// --- End Outlines ---
 
-        const tooltipText = hasData
-          ? `${station.name}: ${value.toFixed(currentConfig.precision)} ${currentConfig.unit}`
-          : `${station.name}: No data`;
-        g.append("title").text(tooltipText);
 
-        // Station Label (with previous adjustments)
-        let labelX = 0; let labelY = 15;
-        if (station.id === 'SJ-1') { labelX = -2; labelY = 18; }
-        else if (station.id === 'RD1') { labelX = 8; labelY = -10; }
+// --- 6. Collect Station Data for Interactive Markers ---
+const stationDataArray = [];
 
-        g.append("text")
-         .attr("x", labelX).attr("y", labelY)
-         .attr("text-anchor", "middle")
-         .style("font-size", "10px")
-         .style("font-family", "sans-serif")
-         .style("fill", "#333")
-         .text(station.name);
+stations.forEach(station => {
+  if (isNaN(station.longitude) || isNaN(station.latitude)) return;
+  try {
+    const projected = projection([station.longitude, station.latitude]);
+    if (!projected || isNaN(projected[0]) || isNaN(projected[1])) return;
 
-      } catch (e) { console.debug(`Error drawing station ${station.id}`); }
+    const value = currentDataForTimepoint[station.id];
+    
+    // Add to station data array for React component
+    stationDataArray.push({
+      station,
+      projected,
+      value,
+      colorScale
     });
-    // --- End Stations ---
+  } catch (e) { console.debug(`Error creating station data ${station.id}`); }
+});
+
+// Update state with station data for interactive markers
+setStationData(stationDataArray);
 
 
-    // --- 7. Add Title, Info Text, and Legend (On Top) ---
-    svg.append("text") // Title
-      .attr("x", MAP_WIDTH / 2).attr("y", 30)
-      .attr("text-anchor", "middle")
-      .style("font-size", "16px").style("font-weight", "bold")
-      .text(`Great Salt Lake ${currentConfig.label} - ${formatDateForTitle(currentTimePoint)}`);
+// --- 7. Add Title, Info Text, and Legend (On Top) ---
+if (!hideTitle) {
+  svg.append("text") // Title
+    .attr("x", MAP_WIDTH / 2).attr("y", 30)
+    .attr("text-anchor", "middle")
+    .style("font-size", "16px").style("font-weight", "bold")
+    .text(`Great Salt Lake ${currentConfig.label} - ${formatDateForTitle(currentTimePoint)}`);
 
-    svg.append("text") // Info text
-      .attr("x", MAP_WIDTH / 2).attr("y", 50)
-      .attr("text-anchor", "middle").style("font-size", "12px")
-      .text(`Avg Temp: ${currentTemperature ? currentTemperature.toFixed(1) + '°F' : 'N/A'} | Avg ${currentConfig.label}: ${avgValue ? avgValue.toFixed(currentConfig.precision) + ` ${currentConfig.unit}` : 'N/A'}`);
+  svg.append("text") // Info text
+    .attr("x", MAP_WIDTH / 2).attr("y", 50)
+    .attr("text-anchor", "middle")
+    .style("font-size", "12px")
+    .text(`Avg Temp: ${currentTemperature ? currentTemperature.toFixed(1) + '°F' : 'N/A'} | Avg ${currentConfig.label}: ${avgValue ? avgValue.toFixed(currentConfig.precision) + ` ${currentConfig.unit}` : 'N/A'}`);
+}
 
-    // Legend
-    const legendArea = svg.append("g").attr("transform", `translate(${MAP_WIDTH - 230}, ${MAP_HEIGHT - 50})`);
-    Legend({
-      svg: legendArea,
-      colorScale,
-      range: currentRange,
-      label: `${currentConfig.label} (${currentConfig.unit})`,
-      width: 200,
-      height: 10
-    });
-    // --- End Title/Info/Legend ---
+// Legend is always shown, even when title is hidden
+const legendArea = svg.append("g").attr("transform", `translate(${MAP_WIDTH - 230}, ${hideTitle ? 20 : MAP_HEIGHT - 50})`);
+Legend({
+  svg: legendArea,
+  colorScale,
+  range: currentRange,
+  label: `${currentConfig.label} (${currentConfig.unit})`,
+  width: 200,
+  height: 10
+});
+// --- End Title/Info/Legend ---
+}, [ // Keep dependencies comprehensive
+    lakeData, stations, projection, currentTimePoint, currentDataForTimepoint,
+    currentTemperature, currentRange, currentConfig, isLoading, formatDateForTitle, onStationClick
+]);
 
-  }, [ // Keep dependencies comprehensive
-       lakeData, stations, projection, currentTimePoint, currentDataForTimepoint,
-       currentTemperature, currentRange, currentConfig, isLoading, formatDateForTitle, onStationClick
-  ]);
-
-  // Effect to trigger rendering
-  useEffect(() => {
-    // Check all potentially changing dependencies that affect rendering
-    if (projection && !isLoading && lakeData && currentConfig && stations) {
-      const animationId = requestAnimationFrame(() => { renderHeatmap(); });
-      return () => cancelAnimationFrame(animationId);
-    }
-  }, [currentTimePoint, isLoading, lakeData, projection, renderHeatmap, currentConfig, stations]); // Include stations here
+// Effect to trigger rendering
+useEffect(() => {
+ // Check all potentially changing dependencies that affect rendering
+ if (projection && !isLoading && lakeData && currentConfig && stations) {
+   const animationId = requestAnimationFrame(() => { renderHeatmap(); });
+   return () => cancelAnimationFrame(animationId);
+ }
+}, [currentTimePoint, isLoading, lakeData, projection, renderHeatmap, currentConfig, stations]); // Include stations here
 
 
-  // SVG container
-  return (
-    <div className="relative border rounded-lg bg-gray-100 overflow-hidden mb-4 shadow aspect-w-16 aspect-h-10 sm:aspect-h-9">
-      <svg
-        ref={svgRef}
-        viewBox={`0 0 ${MAP_WIDTH} ${MAP_HEIGHT}`}
-        preserveAspectRatio="xMidYMid meet"
-        className="absolute top-0 left-0 w-full h-full block"
-        style={{ backgroundColor: "#f0f7fa" }} // Base background if needed
-      />
-    </div>
-  );
+// SVG container with interactive station markers
+return (
+ <div className="relative border rounded-lg bg-gray-100 overflow-hidden mb-4 shadow aspect-w-16 aspect-h-10 sm:aspect-h-9">
+   <svg
+     ref={svgRef}
+     viewBox={`0 0 ${MAP_WIDTH} ${MAP_HEIGHT}`}
+     preserveAspectRatio="xMidYMid meet"
+     className="absolute top-0 left-0 w-full h-full block"
+     style={{ backgroundColor: "#f0f7fa" }} // Base background if needed
+   >
+     {/* Interactive Station Markers rendered as React components */}
+     {stationData.map((data, index) => (
+       <InteractiveStationMarker
+         key={index}
+         station={data.station}
+         value={data.value}git pull
+         projected={data.projected}
+         colorScale={data.colorScale}
+         onClick={onStationClick}
+         variableConfig={currentConfig}
+       />
+     ))}
+   </svg>
+ </div>
+);
 };
 
 export default HeatmapRenderer;
