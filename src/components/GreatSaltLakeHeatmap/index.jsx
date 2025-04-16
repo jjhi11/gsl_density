@@ -5,7 +5,8 @@ import TimeControls from './TimeControls';
 import InfoPanel from './InfoPanel';
 import { loadGeoJsonData, loadSiteAndTempData } from './DataLoader';
 import { createSimpleGeoJSON } from './utils';
-// Removed Legend import as it's used within HeatmapRenderer
+import TimeSeriesChart from './TimeSeriesChart';
+
 
 /**
  * Great Salt Lake Heatmap - Main Component
@@ -25,6 +26,9 @@ const GreatSaltLakeHeatmap = () => {
   const [playing, setPlaying] = useState(false);
   const [error, setError] = useState(null);
   const [usingMockData, setUsingMockData] = useState(false);
+  
+  // Add new state for selected station
+  const [selectedStation, setSelectedStation] = useState(null);
 
   // --- Refs for animation ---
   const playTimerRef = useRef(null);
@@ -40,7 +44,8 @@ const GreatSaltLakeHeatmap = () => {
         unit: 'g/cm³',
         precision: 3,
         interpolate: 'interpolateBlues',
-        defaultRange: [1.0, 1.25]
+        defaultRange: [1.0, 1.25],
+        color: '#2563eb' // Add color for the time series chart
     },
     salinity: {
         key: 'salinity',
@@ -48,7 +53,8 @@ const GreatSaltLakeHeatmap = () => {
         unit: 'g/L',
         precision: 1,
         interpolate: 'interpolateGreens', // Different color for salinity
-        defaultRange: [50, 250]
+        defaultRange: [50, 250],
+        color: '#10b981' // Add color for the time series chart
     },
      temperature: { // Keep temp config for info text if needed
          key: 'temperature',
@@ -56,7 +62,8 @@ const GreatSaltLakeHeatmap = () => {
          unit: '°F',
          precision: 1,
          interpolate: 'interpolateOrRd',
-         defaultRange: [0, 100]
+         defaultRange: [0, 100],
+         color: '#ef4444' // Add color for the time series chart
      }
   }), []);
 
@@ -174,6 +181,21 @@ const GreatSaltLakeHeatmap = () => {
      return allData.temperature ? allData.temperature[currentTimePoint] : undefined;
   }, [allData, currentTimePoint]);
 
+  // Handle station click
+  const handleStationClick = useCallback((station) => {
+    // If the same station is clicked again, deselect it
+    if (selectedStation && selectedStation.id === station.id) {
+      setSelectedStation(null);
+    } else {
+      setSelectedStation(station);
+      console.log(`Selected station: ${station.name} (${station.id})`);
+    }
+  }, [selectedStation]);
+
+  // Handle closing the chart
+  const handleCloseChart = useCallback(() => {
+    setSelectedStation(null);
+  }, []);
 
   // --- Variable Selector Component ---
   const VariableSelector = ({ variables, selectedVar, onChange, isLoading }) => {
@@ -238,7 +260,7 @@ const GreatSaltLakeHeatmap = () => {
         </div>
       )}
 
-       {/* ++ Add Variable Selector ++ */}
+      {/* Variable Selector */}
       <VariableSelector
           variables={availableVariables}
           selectedVar={selectedVariable}
@@ -246,16 +268,35 @@ const GreatSaltLakeHeatmap = () => {
           isLoading={isLoading}
       />
 
-{/* Visualization Area */}
-<div className="mb-6 bg-gray-50 rounded-lg p-2 sm:p-4 shadow-inner relative">
+      {/* Show the station time series chart if a station is selected */}
+      {selectedStation && (
+        <TimeSeriesChart
+          stationId={selectedStation.id}
+          stationName={selectedStation.name}
+          timePoints={timePoints}
+          variableData={currentVariableData}
+          variableConfig={currentConfig}
+          onClose={handleCloseChart}
+        />
+      )}
+
+      {/* Visualization Area */}
+      <div className="mb-6 bg-gray-50 rounded-lg p-2 sm:p-4 shadow-inner relative">
         {/* Loading Overlay */}
-        {isLoading && ( // Check if loading
+        {isLoading && (
           <div className="absolute inset-0 bg-white bg-opacity-75 flex items-center justify-center z-10 rounded-lg">
             <p className="text-lg text-blue-600 animate-pulse">Loading data...</p>
           </div>
-        )} {/* Closing parenthesis belongs here */}
+        )}
 
-        {/* Heatmap - ++ Update Props ++ */}
+        {/* Instructions for user */}
+        {!isLoading && !selectedStation && (
+          <div className="absolute top-2 right-2 z-10 p-2 bg-white bg-opacity-90 rounded-lg shadow-sm text-sm text-gray-600">
+            Click on a station to see {currentConfig.label} changes over time
+          </div>
+        )}
+
+        {/* Heatmap - Update props to include onStationClick */}
         <HeatmapRenderer
           lakeData={lakeData}
           stations={stations}
@@ -265,7 +306,7 @@ const GreatSaltLakeHeatmap = () => {
           currentConfig={currentConfig}
           currentTimePoint={currentTimePoint}
           isLoading={isLoading}
-          // Pass projection if calculated here, otherwise calculate in HeatmapRenderer
+          onStationClick={handleStationClick}
         />
          {/* Time Controls */}
         <TimeControls

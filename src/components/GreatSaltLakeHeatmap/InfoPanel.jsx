@@ -38,10 +38,11 @@ const InfoPanel = () => {
       <h3 style={styles.heading}>Interpretation Guide</h3>
       <div style={styles.contentBox}>
         <ul style={styles.list}>
-          <li style={styles.listItem}>Heatmap shows interpolated density (darker blue = higher g/cm³).</li>
+          <li style={styles.listItem}>Heatmap shows interpolated density (darker blue = higher g/cm³) or salinity (darker green = higher g/L).</li>
           <li style={styles.listItem}>Circles are sampling stations; color matches legend if data exists.</li>
           <li style={styles.listItem}>Use slider or play button to view monthly changes (2000-2025).</li>
-          <li style={styles.listItem}>Observe potential correlations between temperature (Avg Temp) and density patterns.</li>
+          <li style={styles.listItem}><strong>Click on any station</strong> to view its data in a time series chart.</li>
+          <li style={styles.listItem}>Observe potential correlations between temperature (Avg Temp) and the selected variable patterns.</li>
           <li style={styles.listItem}>Data is interpolated between stations using inverse distance weighting.</li>
         </ul>
       </div>

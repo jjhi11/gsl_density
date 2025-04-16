@@ -20,7 +20,8 @@ const HeatmapRenderer = ({
   currentRange,
   currentConfig, // Contains { key, label, unit, precision, interpolate, defaultRange }
   currentTimePoint,
-  isLoading
+  isLoading,
+  onStationClick
 }) => {
   const svgRef = useRef(null);
 
@@ -271,14 +272,22 @@ const HeatmapRenderer = ({
       try {
         const projected = projection([station.longitude, station.latitude]);
         if (!projected || isNaN(projected[0]) || isNaN(projected[1])) return;
-
+  
         const [x, y] = projected;
         const value = currentDataForTimepoint[station.id];
         const hasData = value !== undefined && value !== null && typeof value === 'number' && !isNaN(value);
-        // Use color scale even for points for consistency
         const fillColor = hasData ? colorScale(value) : "#ccc";
-
-        const g = stationGroup.append("g").attr("transform", `translate(${x}, ${y})`);
+  
+        // Update the group to add cursor style and click handler
+        const g = stationGroup.append("g")
+          .attr("transform", `translate(${x}, ${y})`)
+          .attr("class", "station")
+          .style("cursor", "pointer");
+        
+        // Add click handler if onStationClick prop is provided
+        if (onStationClick) {
+          g.on("click", () => onStationClick(station));
+        }
         g.append("circle")
          .attr("r", 5)
          .attr("fill", fillColor)
@@ -334,7 +343,7 @@ const HeatmapRenderer = ({
 
   }, [ // Keep dependencies comprehensive
        lakeData, stations, projection, currentTimePoint, currentDataForTimepoint,
-       currentTemperature, currentRange, currentConfig, isLoading, formatDateForTitle
+       currentTemperature, currentRange, currentConfig, isLoading, formatDateForTitle, onStationClick
   ]);
 
   // Effect to trigger rendering
